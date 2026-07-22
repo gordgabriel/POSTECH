@@ -13,6 +13,9 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 import os
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from decouple import Csv, config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,15 +25,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
+SECRET_KEY = config(
     'SECRET_KEY',
-    'django-insecure-a!w60jf^jlt56z33(k65arv9)9cx!9!qz#y@fum)b!#_lp3j3i',
+    default='django-insecure-a!w60jf^jlt56z33(k65arv9)9cx!9!qz#y@fum)b!#_lp3j3i',
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
 
 # Application definition
@@ -47,6 +50,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'accounts',
     'so',
+    'estoque',
 ]
 
 MIDDLEWARE = [
@@ -83,15 +87,40 @@ WSGI_APPLICATION = 'So_PosTech.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-if os.getenv('DB_HOST'):
+DATABASE_URL = config('DATABASE_URL', default=None)
+
+if DATABASE_URL:
+    parsed_url = urlparse(DATABASE_URL)
+    query_params = parse_qs(parsed_url.query)
+    sslmode = query_params.get('sslmode', ['require'])[0]
+    options = {'sslmode': sslmode}
+
+    if query_params.get('channel_binding'):
+        options['channel_binding'] = query_params['channel_binding'][0]
+
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.getenv('DB_NAME', 'sopostech'),
-            'USER': os.getenv('DB_USER', 'postgres'),
-            'PASSWORD': os.getenv('DB_PASSWORD', 'postgres'),
-            'HOST': os.getenv('DB_HOST', 'db'),
-            'PORT': os.getenv('DB_PORT', '5432'),
+            'NAME': parsed_url.path.lstrip('/'),
+            'USER': parsed_url.username,
+            'PASSWORD': parsed_url.password,
+            'HOST': parsed_url.hostname,
+            'PORT': str(parsed_url.port or 5432),
+            'OPTIONS': options,
+        }
+    }
+elif config('DB_HOST', default=None):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': config('DB_NAME', default='sopostech'),
+            'USER': config('DB_USER', default='postgres'),
+            'PASSWORD': config('DB_PASSWORD', default='postgres'),
+            'HOST': config('DB_HOST', default='db'),
+            'PORT': config('DB_PORT', default='5432'),
+            'OPTIONS': {
+                'sslmode': 'require',
+            },
         }
     }
 else:
