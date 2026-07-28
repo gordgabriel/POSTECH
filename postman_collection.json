@@ -1,0 +1,750 @@
+{
+  "info": {
+    "name": "Oficina Mecânica - So PosTech",
+    "description": "API do Tech Challenge (Fase 2). Fluxo sugerido: 1) Criar usuário em Usuários > Registrar usuário; 2) Fazer login em Autenticação > Obter token (o access token é salvo automaticamente na collection); 3) Usar as demais pastas. Todas as requisições autenticadas usam Bearer {{access_token}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{access_token}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:8000" },
+    { "key": "access_token", "value": "" },
+    { "key": "refresh_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Autenticação",
+      "item": [
+        {
+          "name": "Obter token (login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', data.access);",
+                  "    pm.collectionVariables.set('refresh_token', data.refresh);",
+                  "    console.log('Tokens salvos na collection.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"atendente\",\n  \"password\": \"senha12345\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "token", ""]
+            }
+          }
+        },
+        {
+          "name": "Renovar token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', data.access);",
+                  "    if (data.refresh) { pm.collectionVariables.set('refresh_token', data.refresh); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/refresh/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "token", "refresh", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Usuários",
+      "item": [
+        {
+          "name": "Health check (público)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/health/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "health", ""]
+            }
+          }
+        },
+        {
+          "name": "Registrar usuário (público)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"atendente\",\n  \"email\": \"atendente@oficina.com\",\n  \"password\": \"senha12345\",\n  \"name\": \"Atendente da Oficina\",\n  \"type\": \"atendente\",\n  \"phone_number\": \"11999990000\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", ""]
+            }
+          }
+        },
+        {
+          "name": "Listar usuários (admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/users/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", ""]
+            }
+          }
+        },
+        {
+          "name": "Detalhar usuário",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/users/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Atualizar usuário",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nome Atualizado\",\n  \"phone_number\": \"11988887777\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Excluir usuário (admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/users/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Meu perfil",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/profile/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "profile", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cadastros",
+      "item": [
+        {
+          "name": "Clientes",
+          "item": [
+            {
+              "name": "Listar clientes",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/clientes/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "clientes", ""]
+                }
+              }
+            },
+            {
+              "name": "Criar cliente",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"cpf_cnpj\": \"529.982.247-25\",\n  \"nome\": \"João da Silva\",\n  \"email\": \"joao@email.com\",\n  \"telefone\": \"11999998888\",\n  \"data_nascimento\": \"1990-05-10\",\n  \"endereco\": \"Rua das Oficinas, 123 - São Paulo/SP\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/clientes/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "clientes", ""]
+                }
+              }
+            },
+            {
+              "name": "Detalhar cliente",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/clientes/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "clientes", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            },
+            {
+              "name": "Atualizar cliente",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"telefone\": \"11977776666\",\n  \"endereco\": \"Novo endereço, 456\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/clientes/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "clientes", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            },
+            {
+              "name": "Excluir cliente",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{base_url}}/api/clientes/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "clientes", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Veículos",
+          "item": [
+            {
+              "name": "Listar veículos",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/veiculos/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "veiculos", ""]
+                }
+              }
+            },
+            {
+              "name": "Criar veículo",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"placa\": \"ABC1D23\",\n  \"marca\": \"Fiat\",\n  \"modelo\": \"Uno\",\n  \"ano\": 2015,\n  \"observacao\": \"Arranhão na porta direita\",\n  \"cliente\": 1\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/veiculos/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "veiculos", ""]
+                }
+              }
+            },
+            {
+              "name": "Detalhar veículo",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/veiculos/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "veiculos", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            },
+            {
+              "name": "Atualizar veículo",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"observacao\": \"Observação atualizada\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/veiculos/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "veiculos", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            },
+            {
+              "name": "Excluir veículo",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{base_url}}/api/veiculos/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "veiculos", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Serviços",
+          "item": [
+            {
+              "name": "Listar serviços",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/servicos/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "servicos", ""]
+                }
+              }
+            },
+            {
+              "name": "Criar serviço",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nome\": \"Troca de óleo\",\n  \"descricao\": \"Troca de óleo e filtro\",\n  \"preco\": \"150.00\",\n  \"tempo_execucao\": 60,\n  \"ativo\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/servicos/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "servicos", ""]
+                }
+              }
+            },
+            {
+              "name": "Detalhar serviço",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/servicos/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "servicos", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            },
+            {
+              "name": "Atualizar serviço",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"preco\": \"180.00\",\n  \"ativo\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/servicos/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "servicos", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            },
+            {
+              "name": "Excluir serviço",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{base_url}}/api/servicos/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "servicos", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Estoque",
+      "item": [
+        {
+          "name": "Listar peças",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/pecas/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "pecas", ""]
+            }
+          }
+        },
+        {
+          "name": "Criar peça",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Filtro de óleo\",\n  \"descricao\": \"Filtro de óleo para motores 1.0\",\n  \"preco\": \"40.00\",\n  \"quantidade\": 10,\n  \"quantidade_reservada\": 0,\n  \"estoque_minimo\": 3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/pecas/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "pecas", ""]
+            }
+          }
+        },
+        {
+          "name": "Detalhar peça",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/pecas/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "pecas", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Atualizar peça",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantidade\": 15,\n  \"estoque_minimo\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/pecas/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "pecas", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Excluir peça",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/pecas/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "pecas", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ordens de Serviço",
+      "item": [
+        {
+          "name": "Listar OS",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/ordens-servico/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "ordens-servico", ""]
+            }
+          }
+        },
+        {
+          "name": "Abrir OS",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"descricao\": \"Motor fazendo barulho ao ligar\",\n  \"cliente\": 1,\n  \"veiculo\": 1,\n  \"responsavel\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/ordens-servico/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "ordens-servico", ""]
+            }
+          }
+        },
+        {
+          "name": "Detalhar OS",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/ordens-servico/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "ordens-servico", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Registrar diagnóstico (status EmDiagnostico)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"EmDiagnostico\",\n  \"diagnostico\": \"Correia do alternador desgastada\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/ordens-servico/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "ordens-servico", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Transitar status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"AguardandoAprovacao\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/ordens-servico/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "ordens-servico", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Sequência válida: Recebida -> EmDiagnostico -> AguardandoAprovacao -> EmExecucao -> Finalizada -> Entregue. Reparo adicional: EmExecucao -> AguardandoAprovacao. Cancelada é permitida antes da execução. Qualquer pulo de etapa retorna 400."
+          }
+        },
+        {
+          "name": "Excluir OS",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/ordens-servico/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "ordens-servico", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Itens de Serviço",
+          "item": [
+            {
+              "name": "Listar itens de serviço",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/itens-servico/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "itens-servico", ""]
+                }
+              }
+            },
+            {
+              "name": "Incluir serviço na OS",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"ordem_servico\": 1,\n  \"servico\": 1,\n  \"quantidade\": 1\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/itens-servico/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "itens-servico", ""]
+                },
+                "description": "O preco_unitario é congelado do catálogo na inclusão; não é aceito no body."
+              }
+            },
+            {
+              "name": "Remover item de serviço",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{base_url}}/api/itens-servico/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "itens-servico", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Itens de Peça",
+          "item": [
+            {
+              "name": "Listar itens de peça",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/itens-peca/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "itens-peca", ""]
+                }
+              }
+            },
+            {
+              "name": "Incluir peça na OS",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"ordem_servico\": 1,\n  \"peca\": 1,\n  \"quantidade\": 2\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/itens-peca/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "itens-peca", ""]
+                },
+                "description": "O preco_unitario é congelado do estoque na inclusão; não é aceito no body."
+              }
+            },
+            {
+              "name": "Remover item de peça",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{base_url}}/api/itens-peca/:id/",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "itens-peca", ":id", ""],
+                  "variable": [{ "key": "id", "value": "1" }]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Orçamentos",
+      "item": [
+        {
+          "name": "Listar orçamentos",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/orcamentos/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "orcamentos", ""]
+            }
+          }
+        },
+        {
+          "name": "Gerar orçamento da OS",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ordem_servico\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/orcamentos/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "orcamentos", ""]
+            },
+            "description": "Vincula os itens da OS ainda sem orçamento e grava o valor_total (soma congelada). Sequência 1 é o orçamento inicial; 2 em diante são os reparos adicionais. Retorna 400 se a OS não tiver itens pendentes."
+          }
+        },
+        {
+          "name": "Detalhar orçamento",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/orcamentos/:id/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "orcamentos", ":id", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Enviar orçamento",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/orcamentos/:id/enviar/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "orcamentos", ":id", "enviar", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Registra a data_envio (idempotente: não sobrescreve envio anterior)."
+          }
+        },
+        {
+          "name": "Aprovar orçamento",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/orcamentos/:id/aprovar/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "orcamentos", ":id", "aprovar", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Marca como aprovado e registra data_resposta. Orçamento já respondido retorna 400. A transição da OS para EmExecucao continua sendo feita via PATCH na OS."
+          }
+        },
+        {
+          "name": "Recusar orçamento",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/orcamentos/:id/recusar/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "orcamentos", ":id", "recusar", ""],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Marca como recusado e registra data_resposta."
+          }
+        }
+      ]
+    }
+  ]
+}
