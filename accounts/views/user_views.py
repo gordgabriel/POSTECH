@@ -1,8 +1,8 @@
 from rest_framework import viewsets
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 
-from accounts.models import UserModel, VehiclesModel
-from accounts.serializers import UserCreateSerializer, UserSerializer, VehicleSerializer
+from accounts.models import UserModel
+from accounts.serializers import UserCreateSerializer, UserSerializer
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -26,17 +26,3 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.request.user.is_staff:
             return queryset
         return queryset.filter(pk=self.request.user.pk)
-
-
-class VehicleViewSet(viewsets.ModelViewSet):
-    serializer_class = VehicleSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        queryset = VehiclesModel.objects.select_related('user').order_by('-created_at')
-        if self.request.user.is_staff:
-            return queryset
-        return queryset.filter(user=self.request.user)
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)

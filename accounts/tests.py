@@ -2,25 +2,22 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from accounts.models import UserModel, VehiclesModel
-from so.models import OSModel
+from accounts.models import UserModel
 
 
 class APITestCaseBase(APITestCase):
+    """Autentica um operador (atendente) para os testes de API."""
+
     def setUp(self):
-        self.user = UserModel.objects.create_user(
-            username='cliente',
-            email='cliente@test.com',
+        self.operador = UserModel.objects.create_user(
+            username='atendente',
+            email='atendente@test.com',
             password='senha12345',
-        )
-        self.responsible = UserModel.objects.create_user(
-            username='mecanico',
-            email='mecanico@test.com',
-            password='senha12345',
+            type=UserModel.Tipo.ATENDENTE,
         )
         login_response = self.client.post(
             reverse('token_obtain_pair'),
-            {'username': 'cliente', 'password': 'senha12345'},
+            {'username': 'atendente', 'password': 'senha12345'},
             format='json',
         )
         self.client.credentials(
@@ -43,49 +40,34 @@ class UserRegistrationTests(APITestCase):
                 'username': 'novo',
                 'email': 'novo@test.com',
                 'password': 'senha12345',
+                'name': 'Novo Usuário',
             },
             format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(UserModel.objects.filter(username='novo').exists())
 
-
-class VehicleTests(APITestCaseBase):
-    def test_create_and_list_vehicle(self):
-        response = self.client.post(
-            '/api/vehicles/',
-            {
-                'brand': 'Fiat',
-                'model': 'Uno',
-                'year': 2015,
-                'plate': 'XYZ9A87',
-            },
-            format='json',
+    def test_user_sem_type_nao_e_operador(self):
+        user = UserModel.objects.create_user(
+            username='cliente',
+            email='cliente@test.com',
+            password='senha12345',
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(VehiclesModel.objects.count(), 1)
-        self.assertEqual(response.data['user'], self.user.id)
+        self.assertFalse(user.is_operador)
 
-        list_response = self.client.get('/api/vehicles/')
-        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(list_response.data), 1)
-
-
-class ServiceOrderTests(APITestCaseBase):
-    def test_create_and_list_service_order(self):
-        response = self.client.post(
-            '/api/service-orders/',
-            {
-                'description': 'Revisao geral',
-                'responsible': self.responsible.id,
-                'status': 'Received',
-            },
-            format='json',
+    def test_user_com_type_e_operador(self):
+        user = UserModel.objects.create_user(
+            username='mecanico',
+            email='mecanico@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.MECANICO,
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(OSModel.objects.count(), 1)
-        self.assertEqual(response.data['user'], self.user.id)
+        self.assertTrue(user.is_operador)
 
-        list_response = self.client.get('/api/service-orders/')
-        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(list_response.data), 1)
+
+class ProfileTests(APITestCaseBase):
+    def test_profile_retorna_usuario_logado(self):
+        response = self.client.get('/api/profile/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['username'], 'atendente')
+        self.assertEqual(response.data['type'], 'atendente')

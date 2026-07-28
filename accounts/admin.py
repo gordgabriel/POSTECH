@@ -1,29 +1,22 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from accounts.models import UserModel, VehiclesModel
+from accounts.models import UserModel
 
 
 @admin.register(UserModel)
 class UserModelAdmin(UserAdmin):
-    list_display = ['username', 'email', 'phone_number', 'is_staff', 'is_active']
+    list_display = ['username', 'email', 'type', 'phone_number', 'is_staff', 'is_active']
+    list_filter = UserAdmin.list_filter + ('type',)
     search_fields = ['username', 'email']
     fieldsets = UserAdmin.fieldsets + (
         ('Informações adicionais', {
             'fields': (
                 'uuid',
+                'name',
+                'type',
                 'phone_number',
-                'birth_date',
-                'gender',
-                'address',
             ),
         }),
     )
-    readonly_fields = ['uuid', 'created_at', 'updated_at']
-
-
-@admin.register(VehiclesModel)
-class VehiclesModelAdmin(admin.ModelAdmin):
-    list_display = ['plate', 'brand', 'model', 'year', 'user']
-    search_fields = ['plate', 'brand', 'model', 'user__username']
     readonly_fields = ['uuid', 'created_at', 'updated_at']

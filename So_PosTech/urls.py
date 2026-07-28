@@ -28,5 +28,7 @@ urlpatterns = [
 
     # API routes
     path('api/', include('accounts.urls')),
+    path('api/', include('cadastros.urls')),
+    path('api/', include('estoque.urls')),
     path('api/', include('so.urls')),
 ]

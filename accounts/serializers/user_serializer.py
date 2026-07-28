@@ -10,23 +10,27 @@ class UserSerializer(serializers.ModelSerializer):
             'id',
             'uuid',
             'username',
+            'name',
             'email',
+            'type',
             'first_name',
             'last_name',
             'phone_number',
-            'birth_date',
-            'gender',
-            'address',
             'is_active',
             'is_staff',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'uuid', 'is_staff', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'uuid', 'type', 'is_staff', 'created_at', 'updated_at']
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
+    type = serializers.ChoiceField(
+        choices=UserModel.Tipo.choices,
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = UserModel
@@ -34,14 +38,13 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'id',
             'uuid',
             'username',
+            'name',
             'email',
             'password',
+            'type',
             'first_name',
             'last_name',
             'phone_number',
-            'birth_date',
-            'gender',
-            'address',
         ]
         read_only_fields = ['id', 'uuid']
 
