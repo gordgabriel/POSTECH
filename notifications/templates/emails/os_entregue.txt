@@ -1,0 +1,39 @@
+So PosTech — Oficina Mecânica
+================================
+
+Entrega concluída — boa viagem!
+Status: {{ status_display }}
+
+Olá, {{ cliente_nome }},
+
+Registramos a entrega do seu veículo. Foi um prazer cuidar dele do diagnóstico à liberação.
+Se notar qualquer detalhe nos próximos dias, é só falar com a gente — estamos à disposição.
+
+VEÍCULO
+-------
+{% if veiculo_marca %}{{ veiculo_marca }} {{ veiculo_modelo }}{% if veiculo_ano %} · {{ veiculo_ano }}{% endif %}
+{% endif %}Placa: {{ veiculo_placa }}
+OS: #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %}
+{% if data_abertura %}Abertura: {{ data_abertura|date:"d/m/Y H:i" }}
+{% endif %}
+{% if descricao %}
+QUEIXA REGISTRADA
+-----------------
+{{ descricao }}
+{% endif %}
+{% if diagnostico %}
+DIAGNÓSTICO
+-----------
+{{ diagnostico }}
+{% endif %}
+ATÉ A PRÓXIMA
+-------------
+1. Guarde este e-mail como comprovante da OS
+2. Em caso de garantia ou dúvida, cite a OS #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %}
+3. Estamos prontos quando precisar de novo
+
+Obrigado pela confiança.
+
+—
+So PosTech — cuidado com o seu veículo, do diagnóstico à entrega.
+Este é um e-mail automático. Não responda diretamente.

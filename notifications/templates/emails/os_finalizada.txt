@@ -1,0 +1,40 @@
+So PosTech — Oficina Mecânica
+================================
+
+Serviço finalizado com sucesso
+Status: {{ status_display }}
+
+Olá, {{ cliente_nome }},
+
+Concluímos os serviços da sua ordem. O veículo passou pela verificação final
+e já pode ser liberado. Em breve entraremos em contato para combinar a entrega —
+ou fale conosco quando quiser retirar.
+
+VEÍCULO
+-------
+{% if veiculo_marca %}{{ veiculo_marca }} {{ veiculo_modelo }}{% if veiculo_ano %} · {{ veiculo_ano }}{% endif %}
+{% endif %}Placa: {{ veiculo_placa }}
+OS: #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %}
+{% if data_abertura %}Abertura: {{ data_abertura|date:"d/m/Y H:i" }}
+{% endif %}
+{% if descricao %}
+QUEIXA REGISTRADA
+-----------------
+{{ descricao }}
+{% endif %}
+{% if diagnostico %}
+DIAGNÓSTICO
+-----------
+{{ diagnostico }}
+{% endif %}
+O QUE FAZER AGORA?
+------------------
+1. Aguarde o contato da oficina ou ligue para combinar a retirada
+2. Leve um documento com foto no momento da entrega
+3. Confira o veículo conosco antes de sair
+
+Informe a OS #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %} ao falar com a oficina.
+
+—
+So PosTech — cuidado com o seu veículo, do diagnóstico à entrega.
+Este é um e-mail automático. Não responda diretamente.

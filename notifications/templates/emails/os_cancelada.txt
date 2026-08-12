@@ -1,0 +1,37 @@
+So PosTech — Oficina Mecânica
+================================
+
+Ordem de serviço cancelada
+Status: {{ status_display }}
+
+Olá, {{ cliente_nome }},
+
+A ordem de serviço abaixo foi cancelada. Reservas de peças, se houver, foram liberadas.
+Se o cancelamento não era esperado ou se quiser reabrir o atendimento, fale com a oficina.
+
+VEÍCULO
+-------
+{% if veiculo_marca %}{{ veiculo_marca }} {{ veiculo_modelo }}{% if veiculo_ano %} · {{ veiculo_ano }}{% endif %}
+{% endif %}Placa: {{ veiculo_placa }}
+OS: #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %}
+{% if data_abertura %}Abertura: {{ data_abertura|date:"d/m/Y H:i" }}
+{% endif %}
+{% if descricao %}
+QUEIXA REGISTRADA
+-----------------
+{{ descricao }}
+{% endif %}
+{% if diagnostico %}
+DIAGNÓSTICO
+-----------
+{{ diagnostico }}
+{% endif %}
+PRECISA DE AJUDA?
+-----------------
+1. Confirme com a oficina se o cancelamento estava correto
+2. Se quiser retomar o atendimento, abra uma nova OS
+3. Cite a referência #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %} no contato
+
+—
+So PosTech — cuidado com o seu veículo, do diagnóstico à entrega.
+Este é um e-mail automático. Não responda diretamente.

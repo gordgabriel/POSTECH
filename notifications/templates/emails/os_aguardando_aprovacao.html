@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orçamento aguardando aprovação</title>
+</head>
+<body style="margin:0;padding:0;background-color:#eef2f6;font-family:Georgia,'Times New Roman',serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#eef2f6;padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:4px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+
+          <!-- Top accent -->
+          <tr>
+            <td style="height:5px;background:linear-gradient(90deg,#0f766e 0%,#14b8a6 50%,#f59e0b 100%);font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+
+          <!-- Brand header -->
+          <tr>
+            <td style="padding:28px 36px 8px 36px;background-color:#0f172a;">
+              <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#94a3b8;">
+                So PosTech · Oficina Mecânica
+              </p>
+              <h1 style="margin:10px 0 0 0;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.25;font-weight:normal;color:#f8fafc;">
+                Seu orçamento está pronto
+              </h1>
+              <p style="margin:10px 0 20px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#cbd5e1;">
+                Precisamos da sua aprovação para seguir com o serviço.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Status pill row -->
+          <tr>
+            <td style="padding:0 36px;background-color:#0f172a;">
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="background-color:#f59e0b;border-radius:999px;padding:8px 16px;">
+                    <span style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#1c1917;">
+                      {{ status_display }}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+              <div style="height:24px;line-height:24px;font-size:0;">&nbsp;</div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 36px 8px 36px;">
+              <p style="margin:0 0 18px 0;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.6;color:#1e293b;">
+                Olá, <strong style="color:#0f172a;">{{ cliente_nome }}</strong>,
+              </p>
+              <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.7;color:#475569;">
+                Finalizamos a análise do seu veículo e montamos o orçamento.
+                Assim que você aprovar, a equipe inicia a execução.
+                Se preferir, também pode recusar ou pedir esclarecimentos à oficina.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Vehicle / OS card -->
+          <tr>
+            <td style="padding:0 36px 24px 36px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+                <tr>
+                  <td style="padding:20px 22px;border-bottom:1px solid #e2e8f0;">
+                    <p style="margin:0 0 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">
+                      Veículo
+                    </p>
+                    <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:20px;color:#0f172a;">
+                      {{ veiculo_marca }} {{ veiculo_modelo }}{% if veiculo_ano %} · {{ veiculo_ano }}{% endif %}
+                    </p>
+                    <p style="margin:6px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#0f766e;font-weight:700;">
+                      Placa {{ veiculo_placa }}
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:16px 22px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td width="50%" valign="top" style="padding-right:8px;">
+                          <p style="margin:0 0 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#94a3b8;">OS</p>
+                          <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1e293b;font-weight:700;">#{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %}</p>
+                        </td>
+                        <td width="50%" valign="top">
+                          <p style="margin:0 0 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#94a3b8;">Abertura</p>
+                          <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1e293b;">
+                            {% if data_abertura %}{{ data_abertura|date:"d/m/Y H:i" }}{% else %}—{% endif %}
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          {% if descricao or diagnostico %}
+          <!-- Details -->
+          <tr>
+            <td style="padding:0 36px 24px 36px;">
+              {% if descricao %}
+              <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">
+                Queixa registrada
+              </p>
+              <p style="margin:0 0 16px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#334155;">
+                {{ descricao }}
+              </p>
+              {% endif %}
+              {% if diagnostico %}
+              <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;">
+                Diagnóstico
+              </p>
+              <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#334155;padding:12px 14px;background-color:#ecfdf5;border-left:3px solid #0f766e;border-radius:0 6px 6px 0;">
+                {{ diagnostico }}
+              </p>
+              {% endif %}
+            </td>
+          </tr>
+          {% endif %}
+
+          <!-- Next steps -->
+          <tr>
+            <td style="padding:0 36px 28px 36px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
+                <tr>
+                  <td style="padding:18px 20px;">
+                    <p style="margin:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#92400e;">
+                      O que fazer agora?
+                    </p>
+                    <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65;color:#78350f;">
+                      1. Revise o orçamento no sistema ou com a oficina<br>
+                      2. Aprove para autorizar o início do serviço<br>
+                      3. Ou recuse / solicite ajuste se algo não estiver claro
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td align="center" style="padding:0 36px 36px 36px;">
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="border-radius:8px;background-color:#0f766e;">
+                    <a href="#" style="display:inline-block;padding:14px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;">
+                      Revisar e responder orçamento
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:14px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#94a3b8;">
+                Preferência por telefone? Fale com a oficina e informe a OS <strong style="color:#64748b;">#{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %}</strong>.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 36px;background-color:#f1f5f9;border-top:1px solid #e2e8f0;">
+              <p style="margin:0 0 6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#334155;">
+                <strong>So PosTech</strong> — cuidado com o seu veículo, do diagnóstico à entrega.
+              </p>
+              <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.5;color:#94a3b8;">
+                Este é um e-mail automático. Não responda diretamente a esta mensagem.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

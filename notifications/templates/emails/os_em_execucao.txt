@@ -1,0 +1,39 @@
+So PosTech — Oficina Mecânica
+================================
+
+Mãos à obra no seu veículo
+Status: {{ status_display }}
+
+Olá, {{ cliente_nome }},
+
+Com a aprovação do orçamento, nossa equipe já iniciou o serviço.
+Avisaremos assim que tudo estiver concluído e o veículo pronto para retirada.
+
+VEÍCULO
+-------
+{% if veiculo_marca %}{{ veiculo_marca }} {{ veiculo_modelo }}{% if veiculo_ano %} · {{ veiculo_ano }}{% endif %}
+{% endif %}Placa: {{ veiculo_placa }}
+OS: #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %}
+{% if data_abertura %}Abertura: {{ data_abertura|date:"d/m/Y H:i" }}
+{% endif %}
+{% if descricao %}
+QUEIXA REGISTRADA
+-----------------
+{{ descricao }}
+{% endif %}
+{% if diagnostico %}
+DIAGNÓSTICO
+-----------
+{{ diagnostico }}
+{% endif %}
+ENQUANTO ISSO
+-------------
+1. O mecânico executa os serviços aprovados
+2. Peças reservadas são aplicadas conforme o orçamento
+3. Você recebe aviso quando o serviço for finalizado
+
+Informe a OS #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %} ao falar com a oficina.
+
+—
+So PosTech — cuidado com o seu veículo, do diagnóstico à entrega.
+Este é um e-mail automático. Não responda diretamente.
