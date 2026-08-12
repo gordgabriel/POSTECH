@@ -1,0 +1,39 @@
+So PosTech — Oficina Mecânica
+================================
+
+Seu veículo entrou em diagnóstico
+Status: {{ status_display }}
+
+Olá, {{ cliente_nome }},
+
+A ordem de serviço do seu veículo avançou para a etapa de diagnóstico.
+Em breve você receberá o orçamento com os serviços e peças necessários.
+
+VEÍCULO
+-------
+{% if veiculo_marca %}{{ veiculo_marca }} {{ veiculo_modelo }}{% if veiculo_ano %} · {{ veiculo_ano }}{% endif %}
+{% endif %}Placa: {{ veiculo_placa }}
+OS: #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %}
+{% if data_abertura %}Abertura: {{ data_abertura|date:"d/m/Y H:i" }}
+{% endif %}
+{% if descricao %}
+QUEIXA REGISTRADA
+-----------------
+{{ descricao }}
+{% endif %}
+{% if diagnostico %}
+DIAGNÓSTICO PRELIMINAR
+----------------------
+{{ diagnostico }}
+{% endif %}
+PRÓXIMOS PASSOS
+---------------
+1. A equipe conclui a inspeção técnica
+2. Montamos o orçamento com serviços e peças
+3. Você recebe um novo aviso para aprovar ou recusar
+
+Informe a OS #{% if os_ref %}{{ os_ref }}{% else %}{{ os_uuid|slice:":8"|upper }}{% endif %} ao falar com a oficina.
+
+—
+So PosTech — cuidado com o seu veículo, do diagnóstico à entrega.
+Este é um e-mail automático. Não responda diretamente.

@@ -109,6 +109,8 @@ class OrdemServico(models.Model):
     def save(self, *args, **kwargs):
         baixar_estoque = False
         liberar_estoque = False
+        status_anterior = None
+        notificar = False
 
         if self.pk:
             status_anterior = (
@@ -123,8 +125,13 @@ class OrdemServico(models.Model):
                     baixar_estoque = True
                 elif self.status == StatusOS.CANCELADA:
                     liberar_estoque = True
+                notificar = True
 
         super().save(*args, **kwargs)
+
+        if notificar:
+            from notifications.services.os_notifications import notificar_status_os
+            notificar_status_os(self, status_anterior)
 
         if baixar_estoque:
             EstoqueService.baixar_itens_os(self)

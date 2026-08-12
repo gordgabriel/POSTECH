@@ -1,0 +1,40 @@
+So PosTech — Oficina Mecânica
+================================
+
+Seu orçamento está pronto
+Status: {{ status_display }}
+
+Olá, {{ cliente_nome }},
+
+Finalizamos a análise do seu veículo e montamos o orçamento.
+Assim que você aprovar, a equipe inicia a execução.
+Se preferir, também pode recusar ou pedir esclarecimentos à oficina.
+
+VEÍCULO
+-------
+{{ veiculo_marca }} {{ veiculo_modelo }}{% if veiculo_ano %} · {{ veiculo_ano }}{% endif %}
+Placa: {{ veiculo_placa }}
+OS: #{{ os_ref }}
+{% if data_abertura %}Abertura: {{ data_abertura|date:"d/m/Y H:i" }}
+{% endif %}
+{% if descricao %}
+QUEIXA REGISTRADA
+-----------------
+{{ descricao }}
+{% endif %}
+{% if diagnostico %}
+DIAGNÓSTICO
+-----------
+{{ diagnostico }}
+{% endif %}
+O QUE FAZER AGORA?
+------------------
+1. Revise o orçamento no sistema ou com a oficina
+2. Aprove para autorizar o início do serviço
+3. Ou recuse / solicite ajuste se algo não estiver claro
+
+Informe a OS #{{ os_ref }} ao falar com a oficina.
+
+—
+So PosTech — cuidado com o seu veículo, do diagnóstico à entrega.
+Este é um e-mail automático. Não responda diretamente.
