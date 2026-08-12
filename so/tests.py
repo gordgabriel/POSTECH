@@ -419,3 +419,73 @@ class RelatorioTempoMedioTests(OSTestCaseBase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['total_os'], 0)
         self.assertIsNone(response.data['tempo_medio_horas'])
+
+
+class ComandosOrdemServicoTests(OSTestCaseBase):
+    """Comandos Finalizar OS, Registrar entrega e Cancelar OS."""
+
+    def incluir_peca(self, ordem_servico, quantidade=2):
+        return ItemPecaOS.objects.create(
+            ordem_servico=ordem_servico,
+            peca=self.peca,
+            quantidade=quantidade,
+            preco_unitario=self.peca.preco,
+        )
+
+    def test_finalizar_os_em_execucao(self):
+        os_ = self.criar_os(status=StatusOS.EM_EXECUCAO)
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/finalizar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], StatusOS.FINALIZADA)
+        self.assertIsNotNone(response.data['data_finalizacao'])
+
+    def test_finalizar_os_recebida_retorna_400(self):
+        os_ = self.criar_os()
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/finalizar/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.RECEBIDA)
+
+    def test_entregar_os_finalizada_baixa_estoque(self):
+        os_ = self.criar_os(status=StatusOS.EM_EXECUCAO)
+        self.incluir_peca(os_)
+        os_.transitar_para(StatusOS.FINALIZADA)
+
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/entregar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], StatusOS.ENTREGUE)
+        self.assertIsNotNone(response.data['data_entrega'])
+
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade, 8)
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+
+    def test_entregar_os_recebida_retorna_400(self):
+        os_ = self.criar_os()
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/entregar/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.RECEBIDA)
+
+    def test_cancelar_os_libera_reserva(self):
+        os_ = self.criar_os()
+        self.incluir_peca(os_)
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 2)
+
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/cancelar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], StatusOS.CANCELADA)
+
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+        self.assertEqual(self.peca.quantidade, 10)
+
+    def test_cancelar_os_em_execucao_retorna_400(self):
+        os_ = self.criar_os(status=StatusOS.EM_EXECUCAO)
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/cancelar/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.EM_EXECUCAO)
