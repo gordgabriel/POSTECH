@@ -1,9 +1,18 @@
+from django.contrib.auth.models import AnonymousUser
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIRequestFactory, APITestCase
 
 from accounts.models import UserModel
-
+from accounts.permissions import (
+    IsAdmin,
+    IsAtendente,
+    IsCliente,
+    IsEstoquista,
+    IsMecanico,
+    IsOperador,
+    has_any_role,
+)
 
 class APITestCaseBase(APITestCase):
     """Autentica um operador (atendente) para os testes de API."""
@@ -71,3 +80,203 @@ class ProfileTests(APITestCaseBase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['username'], 'atendente')
         self.assertEqual(response.data['type'], 'atendente')
+
+
+class UserModelTests(APITestCase):
+    def test_str_retorna_username(self):
+        user = UserModel.objects.create_user(
+            username='testuser',
+            email='test@test.com',
+            password='senha12345',
+        )
+        self.assertEqual(str(user), 'testuser')
+
+    def test_get_full_name(self):
+        user = UserModel.objects.create_user(
+            username='testuser',
+            email='test@test.com',
+            password='senha12345',
+            first_name='João',
+            last_name='Silva',
+        )
+        self.assertEqual(user.get_full_name(), 'João Silva')
+
+    def test_staff_e_operador_mesmo_sem_type(self):
+        user = UserModel.objects.create_user(
+            username='admin',
+            email='admin@test.com',
+            password='senha12345',
+            is_staff=True,
+        )
+        self.assertTrue(user.is_operador)
+        self.assertTrue(user.is_admin)
+
+    def test_type_admin_e_admin(self):
+        user = UserModel.objects.create_user(
+            username='admin_ops',
+            email='admin_ops@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.ADMIN,
+        )
+        self.assertTrue(user.is_admin)
+        self.assertTrue(user.is_operador)
+        self.assertFalse(user.is_cliente)
+
+    def test_cliente_sem_type(self):
+        user = UserModel.objects.create_user(
+            username='cliente2',
+            email='cliente2@test.com',
+            password='senha12345',
+        )
+        self.assertTrue(user.is_cliente)
+        self.assertFalse(user.is_operador)
+
+
+class PermissionTests(APITestCase):
+    factory = APIRequestFactory()
+
+    def _check(self, permission_class, user, expected):
+        request = self.factory.get('/')
+        request.user = user
+        self.assertEqual(permission_class().has_permission(request, None), expected)
+
+    def test_anonimo_nega_todas_permissions(self):
+        anon = AnonymousUser()
+        for perm in (IsAdmin, IsAtendente, IsMecanico, IsEstoquista, IsOperador, IsCliente):
+            self._check(perm, anon, False)
+
+    def test_atendente(self):
+        user = UserModel.objects.create_user(
+            username='at',
+            email='at@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.ATENDENTE,
+        )
+        self._check(IsAtendente, user, True)
+        self._check(IsOperador, user, True)
+        self._check(IsMecanico, user, False)
+        self._check(IsCliente, user, False)
+
+    def test_mecanico(self):
+        user = UserModel.objects.create_user(
+            username='mec',
+            email='mec@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.MECANICO,
+        )
+        self._check(IsMecanico, user, True)
+        self._check(IsAtendente, user, False)
+
+    def test_estoquista(self):
+        user = UserModel.objects.create_user(
+            username='est',
+            email='est@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.ESTOQUISTA,
+        )
+        self._check(IsEstoquista, user, True)
+        self._check(IsMecanico, user, False)
+
+    def test_type_admin_passa_is_admin_e_faz_bypass(self):
+        user = UserModel.objects.create_user(
+            username='adm',
+            email='adm@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.ADMIN,
+        )
+        self._check(IsAdmin, user, True)
+        self._check(IsAtendente, user, True)
+        self._check(IsMecanico, user, True)
+        self._check(IsEstoquista, user, True)
+
+    def test_is_staff_passa_is_admin_e_faz_bypass(self):
+        user = UserModel.objects.create_user(
+            username='staff',
+            email='staff@test.com',
+            password='senha12345',
+            is_staff=True,
+        )
+        self._check(IsAdmin, user, True)
+        self._check(IsMecanico, user, True)
+
+    def test_cliente_passa_is_cliente(self):
+        user = UserModel.objects.create_user(
+            username='cli',
+            email='cli@test.com',
+            password='senha12345',
+        )
+        self._check(IsCliente, user, True)
+        self._check(IsOperador, user, False)
+
+    def test_has_any_role_atendente_ou_mecanico(self):
+        perm = has_any_role(IsAtendente, IsMecanico)()
+        atendente = UserModel.objects.create_user(
+            username='at2',
+            email='at2@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.ATENDENTE,
+        )
+        mecanico = UserModel.objects.create_user(
+            username='mec2',
+            email='mec2@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.MECANICO,
+        )
+        estoquista = UserModel.objects.create_user(
+            username='est2',
+            email='est2@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.ESTOQUISTA,
+        )
+        request = self.factory.get('/')
+        request.user = atendente
+        self.assertTrue(perm.has_permission(request, None))
+        request.user = mecanico
+        self.assertTrue(perm.has_permission(request, None))
+        request.user = estoquista
+        self.assertFalse(perm.has_permission(request, None))
+
+
+class UserViewSetTests(APITestCaseBase):
+    def setUp(self):
+        super().setUp()
+        self.outro = UserModel.objects.create_user(
+            username='outro',
+            email='outro@test.com',
+            password='senha12345',
+            type=UserModel.Tipo.MECANICO,
+        )
+
+    def test_operador_nao_lista_usuarios(self):
+        response = self.client.get('/api/users/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_operador_ve_apenas_proprio_detalhe(self):
+        response = self.client.get(f'/api/users/{self.outro.id}/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+        response = self.client.get(f'/api/users/{self.operador.id}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['username'], 'atendente')
+
+    def test_admin_lista_todos_usuarios(self):
+        admin = UserModel.objects.create_superuser(
+            username='super',
+            email='super@test.com',
+            password='senha12345',
+        )
+        self.client.force_authenticate(user=admin)
+        response = self.client.get('/api/users/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(len(response.data), 2)
+
+    def test_admin_remove_usuario(self):
+        admin = UserModel.objects.create_superuser(
+            username='super',
+            email='super@test.com',
+            password='senha12345',
+        )
+        self.client.force_authenticate(user=admin)
+        response = self.client.delete(f'/api/users/{self.outro.id}/')
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(UserModel.objects.filter(pk=self.outro.id).exists())

@@ -1,7 +1,13 @@
+from io import StringIO
+
+from django.core.exceptions import ValidationError
+from django.core.management import call_command
+from django.test import TestCase
 from rest_framework import status
 
 from accounts.tests import APITestCaseBase
-from cadastros.models import Cliente, Veiculo
+from cadastros.models import Cliente, Servico, Veiculo
+from cadastros.validators import validar_cpf_cnpj, validar_placa
 
 CPF_VALIDO = '529.982.247-25'
 CNPJ_VALIDO = '11.444.777/0001-61'
@@ -131,3 +137,31 @@ class ServicoTests(APITestCaseBase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data['ativo'])
+
+
+class ValidatorsTests(TestCase):
+    def test_cpf_com_digitos_invalidos(self):
+        with self.assertRaises(ValidationError):
+            validar_cpf_cnpj('123.456.789-00')
+
+    def test_cnpj_com_digitos_invalidos(self):
+        with self.assertRaises(ValidationError):
+            validar_cpf_cnpj('12.345.678/0001-00')
+
+    def test_documento_com_tamanho_invalido(self):
+        with self.assertRaises(ValidationError):
+            validar_cpf_cnpj('12345')
+
+    def test_placa_invalida(self):
+        with self.assertRaises(ValidationError):
+            validar_placa('INVALIDA')
+
+
+class SeedDemoCommandTests(TestCase):
+    def test_seed_demo_popula_banco(self):
+        out = StringIO()
+        call_command('seed_demo', stdout=out)
+        self.assertGreater(Cliente.objects.count(), 0)
+        self.assertGreater(Veiculo.objects.count(), 0)
+        self.assertGreater(Servico.objects.count(), 0)
+        self.assertIn('Seed concluído', out.getvalue())
