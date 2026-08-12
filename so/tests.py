@@ -395,6 +395,58 @@ class EstoqueIntegracaoTests(OSTestCaseBase):
         self.assertEqual(self.peca.quantidade_reservada, 0)
         self.assertEqual(self.peca.quantidade, 10)
 
+    def test_preco_unitario_vem_do_catalogo_quando_nulo(self):
+        item = ItemPecaOS.objects.create(
+            ordem_servico=self.os,
+            peca=self.peca,
+            quantidade=1,
+        )
+        self.assertEqual(item.preco_unitario, self.peca.preco)
+
+    def test_aumentar_quantidade_reserva_mais_estoque(self):
+        item = ItemPecaOS.objects.create(
+            ordem_servico=self.os,
+            peca=self.peca,
+            quantidade=2,
+            preco_unitario=self.peca.preco,
+        )
+        item.quantidade = 5
+        item.save()
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 5)
+
+    def test_diminuir_quantidade_libera_estoque(self):
+        item = ItemPecaOS.objects.create(
+            ordem_servico=self.os,
+            peca=self.peca,
+            quantidade=5,
+            preco_unitario=self.peca.preco,
+        )
+        item.quantidade = 2
+        item.save()
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 2)
+
+    def test_excluir_item_libera_reserva(self):
+        item = ItemPecaOS.objects.create(
+            ordem_servico=self.os,
+            peca=self.peca,
+            quantidade=3,
+            preco_unitario=self.peca.preco,
+        )
+        item.delete()
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+
+    def test_str_do_item(self):
+        item = ItemPecaOS.objects.create(
+            ordem_servico=self.os,
+            peca=self.peca,
+            quantidade=2,
+            preco_unitario=self.peca.preco,
+        )
+        self.assertEqual(str(item), f'2x {self.peca.nome}')
+
 
 class RelatorioTempoMedioTests(OSTestCaseBase):
     def test_tempo_medio_execucao(self):
@@ -419,6 +471,26 @@ class RelatorioTempoMedioTests(OSTestCaseBase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['total_os'], 0)
         self.assertIsNone(response.data['tempo_medio_horas'])
+
+    def test_tempo_medio_com_filtro_de_periodo(self):
+        os1 = self.criar_os(status=StatusOS.FINALIZADA)
+        os1.data_inicio_execucao = timezone.now() - timedelta(days=5)
+        os1.data_finalizacao = os1.data_inicio_execucao + timedelta(hours=2)
+        os1.save()
+
+        os2 = self.criar_os(status=StatusOS.FINALIZADA)
+        os2.data_inicio_execucao = timezone.now() - timedelta(days=40)
+        os2.data_finalizacao = os2.data_inicio_execucao + timedelta(hours=8)
+        os2.save()
+
+        de = (timezone.now() - timedelta(days=15)).strftime('%Y-%m-%dT00:00:00')
+        ate = timezone.now().strftime('%Y-%m-%dT23:59:59')
+        response = self.client.get(
+            f'/api/relatorios/tempo-medio-execucao/?de={de}&ate={ate}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['total_os'], 1)
+        self.assertEqual(response.data['tempo_medio_horas'], 2.0)
 
 
 class ComandosOrdemServicoTests(OSTestCaseBase):

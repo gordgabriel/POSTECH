@@ -31,8 +31,32 @@ class UserModel(AbstractUser):
     updated_at = models.DateTimeField(auto_now=True)
 
     @property
-    def is_operador(self):
-        return bool(self.type) or self.is_staff
+    def is_admin(self) -> bool:
+        return self.is_staff or self.is_superuser or self.type == self.Tipo.ADMIN
+
+    @property
+    def is_atendente(self) -> bool:
+        return self.type == self.Tipo.ATENDENTE
+
+    @property
+    def is_mecanico(self) -> bool:
+        return self.type == self.Tipo.MECANICO
+
+    @property
+    def is_estoquista(self) -> bool:
+        return self.type == self.Tipo.ESTOQUISTA
+
+    @property
+    def is_operador(self) -> bool:
+        return self.is_admin or self.type in (
+            self.Tipo.ATENDENTE,
+            self.Tipo.MECANICO,
+            self.Tipo.ESTOQUISTA,
+        )
+
+    @property
+    def is_cliente(self) -> bool:
+        return self.is_authenticated and not self.is_operador
 
     def __str__(self):
         return self.username
