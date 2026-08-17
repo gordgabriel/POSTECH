@@ -272,6 +272,7 @@ class ItensETestesDeOrcamento(OSTestCaseBase):
         self.os.save()
         self.adicionar_itens()
         orcamento = Orcamento.gerar_para_os(self.os)
+        self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
         self.os.refresh_from_db()
         self.assertEqual(self.os.status, StatusOS.AGUARDANDO_APROVACAO)
 
@@ -307,7 +308,7 @@ class TransicoesAutomaticasTests(OSTestCaseBase):
         self.assertEqual(response.data['status'], StatusOS.EM_DIAGNOSTICO)
         self.assertIsNotNone(response.data['data_diagnostico'])
 
-    def test_gerar_orcamento_avanca_para_aguardando_aprovacao(self):
+    def test_enviar_orcamento_avanca_para_aguardando_aprovacao(self):
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
         ItemServicoOS.objects.create(
             ordem_servico=os_,
@@ -321,6 +322,14 @@ class TransicoesAutomaticasTests(OSTestCaseBase):
             format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        # Gerar não é evento pivotal: a OS só avança no envio.
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.EM_DIAGNOSTICO)
+
+        response = self.client.post(
+            f'/api/orcamentos/{response.data["id"]}/enviar/',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         os_.refresh_from_db()
         self.assertEqual(os_.status, StatusOS.AGUARDANDO_APROVACAO)
 
@@ -491,6 +500,78 @@ class RelatorioTempoMedioTests(OSTestCaseBase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['total_os'], 1)
         self.assertEqual(response.data['tempo_medio_horas'], 2.0)
+
+
+class RespostaOrcamentoTests(OSTestCaseBase):
+    """Consequências da recusa e do reparo adicional no fluxo da OS."""
+
+    def item_peca(self, os_, quantidade):
+        return ItemPecaOS.objects.create(
+            ordem_servico=os_,
+            peca=self.peca,
+            quantidade=quantidade,
+            preco_unitario=self.peca.preco,
+        )
+
+    def orcamento_enviado(self, os_):
+        orcamento = Orcamento.gerar_para_os(os_)
+        self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
+        return orcamento
+
+    def test_recusa_do_orcamento_inicial_cancela_os_e_libera_reserva(self):
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.item_peca(os_, 3)
+        orcamento = self.orcamento_enviado(os_)
+
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/recusar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], Orcamento.Status.RECUSADO)
+
+        os_.refresh_from_db()
+        self.peca.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.CANCELADA)
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+        self.assertEqual(self.peca.quantidade, 10)
+
+    def test_recusa_de_adicional_mantem_os_em_execucao(self):
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.item_peca(os_, 3)
+        self.orcamento_enviado(os_).responder(aprovado=True)
+
+        # Reparo adicional durante a execução.
+        self.item_peca(os_, 4)
+        adicional = self.orcamento_enviado(os_)
+        self.assertEqual(adicional.sequencia, 2)
+
+        self.client.post(f'/api/orcamentos/{adicional.id}/recusar/')
+
+        os_.refresh_from_db()
+        self.peca.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.EM_EXECUCAO)
+        # Libera só as 4 do adicional; as 3 já aprovadas seguem reservadas.
+        self.assertEqual(self.peca.quantidade_reservada, 3)
+
+    def test_adicional_devolve_os_para_aguardando_aprovacao(self):
+        os_ = self.criar_os(status=StatusOS.EM_EXECUCAO)
+        ItemServicoOS.objects.create(
+            ordem_servico=os_,
+            servico=self.servico,
+            quantidade=1,
+            preco_unitario=self.servico.preco,
+        )
+        self.orcamento_enviado(os_)
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.AGUARDANDO_APROVACAO)
+
+    def test_enviar_orcamento_ja_respondido_retorna_400(self):
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.item_peca(os_, 1)
+        orcamento = self.orcamento_enviado(os_)
+        orcamento.responder(aprovado=True)
+
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
 
 
 class ComandosOrdemServicoTests(OSTestCaseBase):

@@ -47,3 +47,10 @@ class EstoqueService:
     def liberar_itens_os(cls, ordem_servico):
         for item in ordem_servico.itens_peca.select_related('peca'):
             cls.liberar(item.peca, item.quantidade)
+
+    @classmethod
+    @transaction.atomic
+    def liberar_itens_orcamento(cls, orcamento):
+        """Libera a reserva apenas das peças vinculadas a um orçamento."""
+        for item in orcamento.itens_peca.select_related('peca'):
+            cls.liberar(item.peca, item.quantidade)

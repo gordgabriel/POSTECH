@@ -1,5 +1,4 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -38,10 +37,15 @@ class OrcamentoViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def enviar(self, request, pk=None):
+        """Comando Enviar orçamento ao cliente -> OS Aguardando aprovação."""
         orcamento = self.get_object()
-        if orcamento.data_envio is None:
-            orcamento.data_envio = timezone.now()
-            orcamento.save(update_fields=['data_envio'])
+        try:
+            orcamento.enviar()
+        except DjangoValidationError as exc:
+            return Response(
+                {'detail': exc.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(self.get_serializer(orcamento).data)
 
     @action(detail=True, methods=['post'])

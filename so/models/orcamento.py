@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
+from estoque.services import EstoqueService
 from so.models.ordem_servico import OrdemServico, StatusOS
 
 
@@ -80,10 +81,25 @@ class Orcamento(models.Model):
         itens_servico.update(orcamento=orcamento)
         itens_peca.update(orcamento=orcamento)
 
-        if ordem_servico.status == StatusOS.EM_DIAGNOSTICO:
-            ordem_servico.transitar_para(StatusOS.AGUARDANDO_APROVACAO)
-
+        # Gerar não é evento pivotal: quem muda a fase da OS é o envio.
         return orcamento
+
+    def enviar(self):
+        """Comando Enviar orçamento ao cliente. Evento pivotal: muda o status."""
+        if self.status != self.Status.PENDENTE:
+            raise ValidationError(
+                f'Só é possível enviar orçamento pendente '
+                f'(status atual: {self.status}).',
+            )
+        if self.data_envio is None:
+            self.data_envio = timezone.now()
+            self.save(update_fields=['data_envio'])
+
+        os_ = self.ordem_servico
+        # EmExecucao cobre o reparo adicional: a OS volta a aguardar resposta.
+        if os_.status in (StatusOS.EM_DIAGNOSTICO, StatusOS.EM_EXECUCAO):
+            os_.transitar_para(StatusOS.AGUARDANDO_APROVACAO)
+        return self
 
     def responder(self, aprovado):
         if self.status != self.Status.PENDENTE:
@@ -95,7 +111,18 @@ class Orcamento(models.Model):
         self.save(update_fields=['status', 'data_resposta'])
 
         os_ = self.ordem_servico
-        if aprovado and os_.status == StatusOS.AGUARDANDO_APROVACAO:
+        if os_.status != StatusOS.AGUARDANDO_APROVACAO:
+            return
+
+        if aprovado:
+            os_.transitar_para(StatusOS.EM_EXECUCAO)
+        elif self.sequencia == 1:
+            # Recusa do inicial: não há reparo autorizado a executar.
+            # O save() da OS libera as reservas ao entrar em Cancelada.
+            os_.transitar_para(StatusOS.CANCELADA)
+        else:
+            # Recusa de adicional: a OS retoma o que o cliente já aprovou.
+            EstoqueService.liberar_itens_orcamento(self)
             os_.transitar_para(StatusOS.EM_EXECUCAO)
 
     def __str__(self):
