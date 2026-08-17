@@ -112,24 +112,36 @@ class OrdemServicoAPITests(OSTestCaseBase):
 
 class TransicaoStatusTests(OSTestCaseBase):
     def test_fluxo_completo_ate_entrega(self):
+        """Percorre o fluxo inteiro pelos comandos de negócio, sem PATCH de status."""
         os_ = self.criar_os()
-        for novo_status in [
-            StatusOS.EM_DIAGNOSTICO,
-            StatusOS.AGUARDANDO_APROVACAO,
-            StatusOS.EM_EXECUCAO,
-            StatusOS.FINALIZADA,
-            StatusOS.ENTREGUE,
-        ]:
-            response = self.client.patch(
-                f'/api/ordens-servico/{os_.id}/',
-                {'status': novo_status},
-                format='json',
-            )
+
+        def comando(nome):
+            response = self.client.post(f'/api/ordens-servico/{os_.id}/{nome}/')
             self.assertEqual(
                 response.status_code,
                 status.HTTP_200_OK,
-                msg=f'Falhou ao transitar para {novo_status}: {response.data}',
+                msg=f'Falhou no comando {nome}: {response.data}',
             )
+
+        response = self.client.post(
+            f'/api/ordens-servico/{os_.id}/diagnosticar/',
+            {'diagnostico': 'Correia desgastada'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        ItemServicoOS.objects.create(
+            ordem_servico=os_,
+            servico=self.servico,
+            quantidade=1,
+            preco_unitario=self.servico.preco,
+        )
+        orcamento = Orcamento.gerar_para_os(os_)
+        self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
+        self.client.post(f'/api/orcamentos/{orcamento.id}/aprovar/')
+
+        comando('finalizar')
+        comando('entregar')
 
         os_.refresh_from_db()
         self.assertEqual(os_.status, StatusOS.ENTREGUE)
@@ -138,24 +150,32 @@ class TransicaoStatusTests(OSTestCaseBase):
         self.assertIsNotNone(os_.data_finalizacao)
         self.assertIsNotNone(os_.data_entrega)
 
-    def test_pular_etapa_e_rejeitado(self):
+    def test_patch_de_status_nao_muda_a_etapa(self):
+        """O status deixou de ser campo de escrita: o PATCH é ignorado."""
         os_ = self.criar_os()
         response = self.client.patch(
             f'/api/ordens-servico/{os_.id}/',
             {'status': StatusOS.ENTREGUE},
             format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('status', response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], StatusOS.RECEBIDA)
 
-    def test_reparo_adicional_volta_para_aguardando_aprovacao(self):
-        os_ = self.criar_os(status=StatusOS.EM_EXECUCAO)
-        response = self.client.patch(
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.RECEBIDA)
+        self.assertIsNone(os_.data_entrega)
+
+    def test_patch_nao_grava_diagnostico_sem_o_comando(self):
+        """O parecer só entra pelo comando; PATCH não muda a OS pela porta dos fundos."""
+        os_ = self.criar_os()
+        self.client.patch(
             f'/api/ordens-servico/{os_.id}/',
-            {'status': StatusOS.AGUARDANDO_APROVACAO},
+            {'diagnostico': 'Correia desgastada'},
             format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        os_.refresh_from_db()
+        self.assertIsNone(os_.diagnostico)
+        self.assertEqual(os_.status, StatusOS.RECEBIDA)
 
     def test_transicao_invalida_direto_no_model(self):
         os_ = self.criar_os()
@@ -296,17 +316,55 @@ class ItensETestesDeOrcamento(OSTestCaseBase):
         self.assertIsNotNone(response.data['data_envio'])
 
 
-class TransicoesAutomaticasTests(OSTestCaseBase):
-    def test_diagnostico_avanca_status_automaticamente(self):
-        os_ = self.criar_os()
-        response = self.client.patch(
-            f'/api/ordens-servico/{os_.id}/',
-            {'diagnostico': 'Correia desgastada'},
+class ComandoDiagnosticarTests(OSTestCaseBase):
+    """Comando Realizar diagnóstico -> status Em diagnóstico."""
+
+    def diagnosticar(self, os_, parecer='Correia desgastada'):
+        return self.client.post(
+            f'/api/ordens-servico/{os_.id}/diagnosticar/',
+            {'diagnostico': parecer},
             format='json',
         )
+
+    def test_diagnosticar_grava_parecer_e_avanca_status(self):
+        os_ = self.criar_os()
+        response = self.diagnosticar(os_)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], StatusOS.EM_DIAGNOSTICO)
+        self.assertEqual(response.data['diagnostico'], 'Correia desgastada')
         self.assertIsNotNone(response.data['data_diagnostico'])
+
+    def test_diagnosticar_sem_parecer_retorna_400(self):
+        os_ = self.criar_os()
+        response = self.client.post(
+            f'/api/ordens-servico/{os_.id}/diagnosticar/',
+            {'diagnostico': '   '},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('diagnostico', response.data)
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.RECEBIDA)
+
+    def test_revisar_parecer_com_os_ja_em_diagnostico(self):
+        os_ = self.criar_os()
+        self.diagnosticar(os_)
+        response = self.diagnosticar(os_, 'Correia e tensor desgastados')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        os_.refresh_from_db()
+        self.assertEqual(os_.diagnostico, 'Correia e tensor desgastados')
+        self.assertEqual(os_.status, StatusOS.EM_DIAGNOSTICO)
+
+    def test_diagnosticar_os_entregue_retorna_400_e_nao_grava(self):
+        os_ = self.criar_os(status=StatusOS.ENTREGUE)
+        response = self.diagnosticar(os_)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        os_.refresh_from_db()
+        self.assertIsNone(os_.diagnostico)
+        self.assertEqual(os_.status, StatusOS.ENTREGUE)
+
+
+class TransicoesAutomaticasTests(OSTestCaseBase):
 
     def test_enviar_orcamento_avanca_para_aguardando_aprovacao(self):
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)

@@ -36,6 +36,26 @@ class OrdemServicoViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(ordem_servico).data)
 
     @action(detail=True, methods=['post'])
+    def diagnosticar(self, request, pk=None):
+        """Comando Realizar diagnóstico -> status Em diagnóstico."""
+        ordem_servico = self.get_object()
+        diagnostico = (request.data.get('diagnostico') or '').strip()
+        if not diagnostico:
+            return Response(
+                {'diagnostico': ['Informe o parecer do diagnóstico.']},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        ordem_servico.diagnostico = diagnostico
+        if ordem_servico.status == StatusOS.EM_DIAGNOSTICO:
+            # Revisão do parecer com a OS já em diagnóstico: não há transição.
+            ordem_servico.save(update_fields=['diagnostico', 'updated_at'])
+            return Response(self.get_serializer(ordem_servico).data)
+        # transitar_para persiste o diagnóstico junto; se a transição for
+        # inválida nada é gravado e o parecer não entra pela porta dos fundos.
+        return self._transitar(ordem_servico, StatusOS.EM_DIAGNOSTICO)
+
+    @action(detail=True, methods=['post'])
     def finalizar(self, request, pk=None):
         """Comando Finalizar OS -> status Finalizada."""
         return self._transitar(self.get_object(), StatusOS.FINALIZADA)

@@ -1,7 +1,6 @@
-from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from so.models import OrdemServico, StatusOS
+from so.models import OrdemServico
 from so.serializers.item_peca_serializer import ItemPecaOSSerializer
 from so.serializers.item_servico_serializer import ItemServicoOSSerializer
 from so.serializers.orcamento_serializer import OrcamentoSerializer
@@ -45,9 +44,14 @@ class OrdemServicoSerializer(serializers.ModelSerializer):
             'orcamentos',
             'updated_at',
         ]
+        # O status e o diagnóstico não são campos de escrita: mudam como
+        # consequência dos comandos de negócio (/diagnosticar/, /finalizar/,
+        # /entregar/, /cancelar/ e o /enviar/ e /aprovar/ do orçamento).
         read_only_fields = [
             'id',
             'uuid',
+            'status',
+            'diagnostico',
             'data_abertura',
             'data_diagnostico',
             'data_inicio_execucao',
@@ -63,24 +67,4 @@ class OrdemServicoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'veiculo': 'O veículo informado não pertence ao cliente da OS.'},
             )
-
-        if self.instance and 'status' in attrs:
-            novo_status = attrs['status']
-            if novo_status != self.instance.status:
-                try:
-                    OrdemServico.validar_transicao(self.instance.status, novo_status)
-                except DjangoValidationError as exc:
-                    raise serializers.ValidationError(exc.message_dict)
         return attrs
-
-    def update(self, instance, validated_data):
-        auto_diagnostico = (
-            validated_data.get('diagnostico')
-            and instance.status == StatusOS.RECEBIDA
-            and 'status' not in validated_data
-        )
-        instance = super().update(instance, validated_data)
-        if auto_diagnostico:
-            instance.transitar_para(StatusOS.EM_DIAGNOSTICO)
-            instance.refresh_from_db()
-        return instance

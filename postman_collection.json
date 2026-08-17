@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Oficina Mecânica — So PosTech API v2",
-    "description": "Collection atualizada com fluxo automático de status, controle de estoque e relatórios.\n\n## Setup rápido\n1. **Autenticação → Obter token** (salva `access_token` automaticamente)\n2. Operadores disponíveis (senha `senha12345`): `atendente`, `mecanico`, `estoquista`, `admin_ops`\n3. Dados demo: `docker compose exec web python manage.py seed_demo`\n\n## Fluxo da OS\n`Recebida` → PATCH diagnóstico → `EmDiagnostico` (auto) → incluir itens → POST orçamento → `AguardandoAprovacao` (auto) → enviar → aprovar → `EmExecucao` (auto) → `Finalizada` → `Entregue` (baixa estoque)\n\n## Variáveis da collection\nSalvas automaticamente pelos scripts de teste: `cliente_id`, `veiculo_id`, `os_id`, `servico_id`, `peca_id`, `orcamento_id`",
+    "description": "Collection do fluxo de Ordem de Serviço, controle de estoque e relatórios.\n\n## Setup rápido\n1. **Autenticação → Obter token** (salva `access_token` automaticamente)\n2. Operadores disponíveis (senha `senha12345`): `atendente`, `mecanico`, `estoquista`, `admin_ops`\n3. Dados demo: `docker compose exec web python manage.py seed_demo`\n\n## Fluxo da OS\nO status **não** é um campo de escrita: ele muda como consequência dos comandos de negócio. PATCH com `status` é ignorado.\n\n`Recebida` → POST `/diagnosticar/` → `EmDiagnostico` → incluir itens → POST `/orcamentos/` (não muda o status) → POST `/orcamentos/{id}/enviar/` → `AguardandoAprovacao` → POST `/orcamentos/{id}/aprovar/` → `EmExecucao` → POST `/finalizar/` → `Finalizada` → POST `/entregar/` → `Entregue` (baixa estoque)\n\n**Reparo adicional:** com a OS em `EmExecucao`, incluir item → gerar orçamento → enviar → a OS volta para `AguardandoAprovacao` e retorna a `EmExecucao` na aprovação.\n\n**Recusa:** do orçamento inicial cancela a OS e libera as reservas; de um adicional devolve a OS para `EmExecucao` e libera só as peças daquele orçamento.\n\n**Cancelamento:** POST `/cancelar/` vale até `AguardandoAprovacao`; a partir de `EmExecucao` retorna 400.\n\n## Variáveis da collection\nSalvas automaticamente pelos scripts de teste: `cliente_id`, `veiculo_id`, `os_id`, `servico_id`, `peca_id`, `orcamento_id`",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -376,29 +376,53 @@
           "request": { "method": "GET", "url": "{{base_url}}/api/ordens-servico/{{os_id}}/" }
         },
         {
-          "name": "Registrar diagnóstico (auto → EmDiagnostico)",
+          "name": "Registrar diagnóstico (→ EmDiagnostico)",
           "request": {
-            "method": "PATCH",
+            "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"diagnostico\": \"Correia do alternador desgastada — recomendada troca\"\n}"
             },
-            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/",
-            "description": "Sem enviar status: ao preencher diagnostico com OS Recebida, status muda automaticamente para EmDiagnostico."
+            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/diagnosticar/",
+            "description": "Comando Realizar diagnóstico: grava o parecer do mecânico e leva a OS para EmDiagnostico. Parecer vazio retorna 400. Transição inválida retorna 400 e não grava o parecer."
           }
         },
         {
-          "name": "Transitar status manualmente",
+          "name": "Finalizar OS (→ Finalizada)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/finalizar/",
+            "description": "Comando Finalizar OS. Só a partir de EmExecucao; carimba data_finalizacao."
+          }
+        },
+        {
+          "name": "Registrar entrega (→ Entregue, baixa estoque)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/entregar/",
+            "description": "Comando Registrar entrega do veículo. Só a partir de Finalizada. Carimba data_entrega e baixa do estoque as peças utilizadas."
+          }
+        },
+        {
+          "name": "Cancelar OS (→ Cancelada, libera reservas)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/cancelar/",
+            "description": "Comando Cancelar OS. Válido até AguardandoAprovacao; a partir de EmExecucao retorna 400. Libera as peças reservadas."
+          }
+        },
+        {
+          "name": "PATCH de status (deve ser ignorado)",
           "request": {
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"Finalizada\"\n}"
+              "raw": "{\n  \"status\": \"Entregue\",\n  \"diagnostico\": \"tentativa pela porta dos fundos\"\n}"
             },
             "url": "{{base_url}}/api/ordens-servico/{{os_id}}/",
-            "description": "Sequência: Recebida → EmDiagnostico → AguardandoAprovacao → EmExecucao → Finalizada → Entregue. Reparo adicional: EmExecucao → AguardandoAprovacao."
+            "description": "VERIFICAÇÃO: status e diagnostico são read-only. A resposta volta 200, mas a OS NÃO muda de etapa. O status só muda como consequência dos comandos de negócio."
           }
         },
         {
@@ -467,7 +491,7 @@
           "request": { "method": "GET", "url": "{{base_url}}/api/orcamentos/" }
         },
         {
-          "name": "Gerar orçamento (auto → AguardandoAprovacao)",
+          "name": "Gerar orçamento (não muda o status)",
           "event": [{
             "listen": "test",
             "script": {
@@ -487,7 +511,7 @@
               "raw": "{\n  \"ordem_servico\": {{os_id}}\n}"
             },
             "url": "{{base_url}}/api/orcamentos/",
-            "description": "Soma itens pendentes, congela valor_total e, se OS estiver EmDiagnostico, muda automaticamente para AguardandoAprovacao."
+            "description": "Soma os itens ainda não orçados e congela valor_total. Gerar NÃO é evento pivotal: quem move a OS é o envio. Sequência 1 é o inicial, 2 em diante são os reparos adicionais."
           }
         },
         {
@@ -495,25 +519,27 @@
           "request": { "method": "GET", "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/" }
         },
         {
-          "name": "Enviar orçamento",
+          "name": "Enviar orçamento (→ AguardandoAprovacao)",
           "request": {
             "method": "POST",
-            "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/enviar/"
+            "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/enviar/",
+            "description": "Comando Enviar orçamento ao cliente. Evento pivotal: leva a OS para AguardandoAprovacao, tanto a partir de EmDiagnostico quanto de EmExecucao (reparo adicional). Orçamento já respondido retorna 400."
           }
         },
         {
-          "name": "Aprovar orçamento (auto → EmExecucao)",
+          "name": "Aprovar orçamento (→ EmExecucao)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/aprovar/",
-            "description": "Aprova o orçamento e move a OS automaticamente para EmExecucao."
+            "description": "Aprova o orçamento e move a OS para EmExecucao, carimbando data_inicio_execucao."
           }
         },
         {
-          "name": "Recusar orçamento",
+          "name": "Recusar orçamento (→ Cancelada ou volta a EmExecucao)",
           "request": {
             "method": "POST",
-            "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/recusar/"
+            "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/recusar/",
+            "description": "Recusa do orçamento inicial (sequencia 1): cancela a OS e libera todas as peças reservadas. Recusa de um adicional: devolve a OS para EmExecucao e libera apenas as peças daquele orçamento."
           }
         }
       ]
@@ -594,10 +620,10 @@
             }
           }],
           "request": {
-            "method": "PATCH",
+            "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\"diagnostico\":\"Correia desgastada\"}" },
-            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/"
+            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/diagnosticar/"
           }
         },
         {
@@ -671,19 +697,15 @@
         {
           "name": "9 — Finalizar OS",
           "request": {
-            "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"status\":\"Finalizada\"}" },
-            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/"
+            "method": "POST",
+            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/finalizar/"
           }
         },
         {
-          "name": "10 — Entregar OS (baixa estoque)",
+          "name": "10 — Registrar entrega (baixa estoque)",
           "request": {
-            "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"status\":\"Entregue\"}" },
-            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/"
+            "method": "POST",
+            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/entregar/"
           }
         }
       ]
