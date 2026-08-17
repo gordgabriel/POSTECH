@@ -44,9 +44,7 @@ class OrdemServicoSerializer(serializers.ModelSerializer):
             'orcamentos',
             'updated_at',
         ]
-        # O status e o diagnóstico não são campos de escrita: mudam como
-        # consequência dos comandos de negócio (/diagnosticar/, /finalizar/,
-        # /entregar/, /cancelar/ e o /enviar/ e /aprovar/ do orçamento).
+        # Status e diagnóstico mudam pelos comandos de negócio, não por PATCH.
         read_only_fields = [
             'id',
             'uuid',

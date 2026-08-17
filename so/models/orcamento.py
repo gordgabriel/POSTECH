@@ -84,6 +84,9 @@ class Orcamento(models.Model):
         # Gerar não é evento pivotal: quem muda a fase da OS é o envio.
         return orcamento
 
+    # EmExecucao cobre o reparo adicional: a OS volta a aguardar resposta.
+    STATUS_OS_QUE_PERMITEM_ENVIO = (StatusOS.EM_DIAGNOSTICO, StatusOS.EM_EXECUCAO)
+
     def enviar(self):
         """Comando Enviar orçamento ao cliente. Evento pivotal: muda o status."""
         if self.status != self.Status.PENDENTE:
@@ -91,28 +94,41 @@ class Orcamento(models.Model):
                 f'Só é possível enviar orçamento pendente '
                 f'(status atual: {self.status}).',
             )
+
+        os_ = self.ordem_servico
+        if os_.status not in self.STATUS_OS_QUE_PERMITEM_ENVIO:
+            raise ValidationError(
+                f'Não é possível enviar orçamento com a OS em '
+                f'"{os_.get_status_display()}". A OS precisa estar em '
+                f'diagnóstico, ou em execução no caso de reparo adicional.',
+            )
+
         if self.data_envio is None:
             self.data_envio = timezone.now()
             self.save(update_fields=['data_envio'])
 
-        os_ = self.ordem_servico
-        # EmExecucao cobre o reparo adicional: a OS volta a aguardar resposta.
-        if os_.status in (StatusOS.EM_DIAGNOSTICO, StatusOS.EM_EXECUCAO):
-            os_.transitar_para(StatusOS.AGUARDANDO_APROVACAO)
+        os_.transitar_para(StatusOS.AGUARDANDO_APROVACAO)
         return self
 
     def responder(self, aprovado):
+        """Comandos Aprovar e Recusar orçamento. Evento pivotal: muda o status."""
         if self.status != self.Status.PENDENTE:
             raise ValidationError(
                 f'Orçamento já respondido (status atual: {self.status}).',
             )
+
+        os_ = self.ordem_servico
+        # A resposta do cliente só existe depois do envio.
+        if os_.status != StatusOS.AGUARDANDO_APROVACAO:
+            raise ValidationError(
+                f'Não é possível responder um orçamento com a OS em '
+                f'"{os_.get_status_display()}". Envie o orçamento ao cliente '
+                f'antes de registrar a resposta.',
+            )
+
         self.status = self.Status.APROVADO if aprovado else self.Status.RECUSADO
         self.data_resposta = timezone.now()
         self.save(update_fields=['status', 'data_resposta'])
-
-        os_ = self.ordem_servico
-        if os_.status != StatusOS.AGUARDANDO_APROVACAO:
-            return
 
         if aprovado:
             os_.transitar_para(StatusOS.EM_EXECUCAO)

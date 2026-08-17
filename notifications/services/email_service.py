@@ -10,8 +10,8 @@ DEFAULT_SUBJECTS = {
     'os_em_diagnostico': 'Sua OS entrou em diagnóstico',
     'os_aguardando_aprovacao': 'Orçamento aguardando sua aprovação',
     'os_em_execucao': 'Serviço em execução',
-    'os_finalizada': 'Serviço finalizado',
-    'os_entregue': 'Veículo pronto para retirada',
+    'os_finalizada': 'Serviço concluído — veículo pronto para retirada',
+    'os_entregue': 'Veículo entregue — ordem de serviço encerrada',
     'os_cancelada': 'Ordem de serviço cancelada',
 }
 

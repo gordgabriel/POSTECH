@@ -48,11 +48,10 @@ class OrdemServicoViewSet(viewsets.ModelViewSet):
 
         ordem_servico.diagnostico = diagnostico
         if ordem_servico.status == StatusOS.EM_DIAGNOSTICO:
-            # Revisão do parecer com a OS já em diagnóstico: não há transição.
+            # Revisão do parecer: não há transição a fazer.
             ordem_servico.save(update_fields=['diagnostico', 'updated_at'])
             return Response(self.get_serializer(ordem_servico).data)
-        # transitar_para persiste o diagnóstico junto; se a transição for
-        # inválida nada é gravado e o parecer não entra pela porta dos fundos.
+        # transitar_para grava o diagnóstico junto; transição inválida não grava nada.
         return self._transitar(ordem_servico, StatusOS.EM_DIAGNOSTICO)
 
     @action(detail=True, methods=['post'])

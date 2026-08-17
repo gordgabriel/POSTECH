@@ -112,7 +112,6 @@ class OrdemServicoAPITests(OSTestCaseBase):
 
 class TransicaoStatusTests(OSTestCaseBase):
     def test_fluxo_completo_ate_entrega(self):
-        """Percorre o fluxo inteiro pelos comandos de negócio, sem PATCH de status."""
         os_ = self.criar_os()
 
         def comando(nome):
@@ -151,7 +150,6 @@ class TransicaoStatusTests(OSTestCaseBase):
         self.assertIsNotNone(os_.data_entrega)
 
     def test_patch_de_status_nao_muda_a_etapa(self):
-        """O status deixou de ser campo de escrita: o PATCH é ignorado."""
         os_ = self.criar_os()
         response = self.client.patch(
             f'/api/ordens-servico/{os_.id}/',
@@ -166,7 +164,6 @@ class TransicaoStatusTests(OSTestCaseBase):
         self.assertIsNone(os_.data_entrega)
 
     def test_patch_nao_grava_diagnostico_sem_o_comando(self):
-        """O parecer só entra pelo comando; PATCH não muda a OS pela porta dos fundos."""
         os_ = self.criar_os()
         self.client.patch(
             f'/api/ordens-servico/{os_.id}/',
@@ -309,11 +306,39 @@ class ItensETestesDeOrcamento(OSTestCaseBase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_enviar_orcamento_registra_data_envio(self):
+        self.os.status = StatusOS.EM_DIAGNOSTICO
+        self.os.save()
         self.adicionar_itens()
         orcamento = Orcamento.gerar_para_os(self.os)
         response = self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNotNone(response.data['data_envio'])
+
+    def test_enviar_com_os_em_recebida_retorna_400(self):
+        self.adicionar_itens()
+        orcamento = Orcamento.gerar_para_os(self.os)
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        orcamento.refresh_from_db()
+        self.os.refresh_from_db()
+        self.assertIsNone(orcamento.data_envio)
+        self.assertEqual(self.os.status, StatusOS.RECEBIDA)
+
+    def test_responder_sem_envio_retorna_400_e_nao_marca_o_orcamento(self):
+        self.os.status = StatusOS.EM_DIAGNOSTICO
+        self.os.save()
+        self.adicionar_itens()
+        orcamento = Orcamento.gerar_para_os(self.os)
+
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/aprovar/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        orcamento.refresh_from_db()
+        self.os.refresh_from_db()
+        self.assertEqual(orcamento.status, Orcamento.Status.PENDENTE)
+        self.assertIsNone(orcamento.data_resposta)
+        self.assertEqual(self.os.status, StatusOS.EM_DIAGNOSTICO)
 
 
 class ComandoDiagnosticarTests(OSTestCaseBase):
@@ -515,6 +540,57 @@ class EstoqueIntegracaoTests(OSTestCaseBase):
         self.assertEqual(str(item), f'2x {self.peca.nome}')
 
 
+class RemocaoProtegidaTests(OSTestCaseBase):
+    """PROTECT preserva o histórico; a API deve dizer 409, não estourar 500."""
+
+    def setUp(self):
+        super().setUp()
+        self.os = self.criar_os()
+        ItemServicoOS.objects.create(
+            ordem_servico=self.os,
+            servico=self.servico,
+            quantidade=1,
+            preco_unitario=self.servico.preco,
+        )
+        ItemPecaOS.objects.create(
+            ordem_servico=self.os,
+            peca=self.peca,
+            quantidade=1,
+            preco_unitario=self.peca.preco,
+        )
+
+    def test_remover_cliente_com_os_retorna_409(self):
+        response = self.client.delete(f'/api/clientes/{self.cliente.id}/')
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertIn('detail', response.data)
+        self.assertTrue(Cliente.objects.filter(pk=self.cliente.pk).exists())
+
+    def test_remover_veiculo_com_os_retorna_409(self):
+        response = self.client.delete(f'/api/veiculos/{self.veiculo.id}/')
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertTrue(Veiculo.objects.filter(pk=self.veiculo.pk).exists())
+
+    def test_remover_servico_com_item_de_os_retorna_409(self):
+        response = self.client.delete(f'/api/servicos/{self.servico.id}/')
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertTrue(Servico.objects.filter(pk=self.servico.pk).exists())
+
+    def test_remover_peca_com_item_de_os_retorna_409(self):
+        response = self.client.delete(f'/api/pecas/{self.peca.id}/')
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertTrue(Peca.objects.filter(pk=self.peca.pk).exists())
+
+    def test_remover_cadastro_sem_vinculo_continua_funcionando(self):
+        livre = Servico.objects.create(
+            nome='Serviço sem uso',
+            preco=Decimal('10.00'),
+            tempo_execucao=10,
+        )
+        response = self.client.delete(f'/api/servicos/{livre.id}/')
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Servico.objects.filter(pk=livre.pk).exists())
+
+
 class RelatorioTempoMedioTests(OSTestCaseBase):
     def test_tempo_medio_execucao(self):
         os1 = self.criar_os(status=StatusOS.FINALIZADA)
@@ -572,9 +648,17 @@ class RespostaOrcamentoTests(OSTestCaseBase):
         )
 
     def orcamento_enviado(self, os_):
+        """Devolve instância limpa: o envio muda a OS no banco."""
         orcamento = Orcamento.gerar_para_os(os_)
-        self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
-        return orcamento
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        os_.refresh_from_db()
+        return Orcamento.objects.get(pk=orcamento.pk)
+
+    def aprovar(self, orcamento):
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/aprovar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        return response
 
     def test_recusa_do_orcamento_inicial_cancela_os_e_libera_reserva(self):
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
@@ -594,12 +678,16 @@ class RespostaOrcamentoTests(OSTestCaseBase):
     def test_recusa_de_adicional_mantem_os_em_execucao(self):
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
         self.item_peca(os_, 3)
-        self.orcamento_enviado(os_).responder(aprovado=True)
+        self.aprovar(self.orcamento_enviado(os_))
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.EM_EXECUCAO)
 
         # Reparo adicional durante a execução.
         self.item_peca(os_, 4)
         adicional = self.orcamento_enviado(os_)
         self.assertEqual(adicional.sequencia, 2)
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.AGUARDANDO_APROVACAO)
 
         self.client.post(f'/api/orcamentos/{adicional.id}/recusar/')
 
@@ -625,7 +713,7 @@ class RespostaOrcamentoTests(OSTestCaseBase):
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
         self.item_peca(os_, 1)
         orcamento = self.orcamento_enviado(os_)
-        orcamento.responder(aprovado=True)
+        self.aprovar(orcamento)
 
         response = self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

@@ -116,3 +116,36 @@ class NotificarStatusOSTests(TestCase):
         self.os.transitar_para(StatusOS.EM_DIAGNOSTICO)
         self.os.refresh_from_db()
         self.assertEqual(self.os.status, StatusOS.EM_DIAGNOSTICO)
+
+    def test_cada_etapa_dispara_o_assunto_da_sua_etapa(self):
+        esperado = [
+            (StatusOS.EM_DIAGNOSTICO, 'diagnóstico'),
+            (StatusOS.AGUARDANDO_APROVACAO, 'aprovação'),
+            (StatusOS.EM_EXECUCAO, 'execução'),
+            (StatusOS.FINALIZADA, 'pronto para retirada'),
+            (StatusOS.ENTREGUE, 'entregue'),
+        ]
+        for novo_status, trecho in esperado:
+            mail.outbox.clear()
+            self.os.transitar_para(novo_status)
+            self.assertEqual(len(mail.outbox), 1, f'sem e-mail em {novo_status}')
+            self.assertIn(
+                trecho,
+                mail.outbox[0].subject.lower(),
+                f'assunto errado em {novo_status}: {mail.outbox[0].subject!r}',
+            )
+
+    def test_cancelamento_notifica(self):
+        mail.outbox.clear()
+        self.os.transitar_para(StatusOS.CANCELADA)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('cancelada', mail.outbox[0].subject.lower())
+
+    def test_cliente_sem_email_nao_quebra_a_transicao(self):
+        self.cliente.email = ''
+        self.cliente.save()
+        mail.outbox.clear()
+        self.os.transitar_para(StatusOS.EM_DIAGNOSTICO)
+        self.os.refresh_from_db()
+        self.assertEqual(self.os.status, StatusOS.EM_DIAGNOSTICO)
+        self.assertEqual(len(mail.outbox), 0)

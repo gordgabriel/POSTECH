@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.utils.dateparse import parse_datetime
+from django.utils.timezone import is_naive, make_aware
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,14 +17,22 @@ class TempoMedioExecucaoView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _parse(valor):
+        """Filtro sem fuso é interpretado no fuso do projeto."""
+        data = parse_datetime(valor or '')
+        if data and is_naive(data):
+            return make_aware(data)
+        return data
+
     def get(self, request):
         queryset = OrdemServico.objects.filter(
             data_inicio_execucao__isnull=False,
             data_finalizacao__isnull=False,
         )
 
-        de = parse_datetime(request.query_params.get('de', ''))
-        ate = parse_datetime(request.query_params.get('ate', ''))
+        de = self._parse(request.query_params.get('de', ''))
+        ate = self._parse(request.query_params.get('ate', ''))
         if de:
             queryset = queryset.filter(data_finalizacao__gte=de)
         if ate:
