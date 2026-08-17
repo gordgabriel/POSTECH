@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Oficina Mecânica — So PosTech API v2",
-    "description": "Collection do fluxo de Ordem de Serviço, controle de estoque e relatórios.\n\n## Setup rápido\n1. **Autenticação → Obter token** (salva `access_token` automaticamente)\n2. Operadores disponíveis (senha `senha12345`): `atendente`, `mecanico`, `estoquista`, `admin_ops`\n3. Dados demo: `docker compose exec web python manage.py seed_demo`\n\n## Fluxo da OS\nO status **não** é um campo de escrita: ele muda como consequência dos comandos de negócio. PATCH com `status` é ignorado.\n\n`Recebida` → POST `/diagnosticar/` → `EmDiagnostico` → incluir itens → POST `/orcamentos/` (não muda o status) → POST `/orcamentos/{id}/enviar/` → `AguardandoAprovacao` → POST `/orcamentos/{id}/aprovar/` → `EmExecucao` → POST `/finalizar/` → `Finalizada` → POST `/entregar/` → `Entregue` (baixa estoque)\n\n**Reparo adicional:** com a OS em `EmExecucao`, incluir item → gerar orçamento → enviar → a OS volta para `AguardandoAprovacao` e retorna a `EmExecucao` na aprovação.\n\n**Recusa:** do orçamento inicial cancela a OS e libera as reservas; de um adicional devolve a OS para `EmExecucao` e libera só as peças daquele orçamento.\n\n**Cancelamento:** POST `/cancelar/` vale até `AguardandoAprovacao`; a partir de `EmExecucao` retorna 400.\n\n## Variáveis da collection\nSalvas automaticamente pelos scripts de teste: `cliente_id`, `veiculo_id`, `os_id`, `servico_id`, `peca_id`, `orcamento_id`",
+    "description": "Collection do fluxo de Ordem de Serviço, controle de estoque e relatórios.\n\n## Setup rápido\n1. Rode **os quatro logins** da pasta Autenticação: atendente, mecânico, estoquista e admin. Cada comando exige o papel do ator que o executa, e as requisições já usam o token certo.\n2. Operadores (senha `senha12345`): `atendente`, `mecanico`, `estoquista`, `admin_ops`. Cliente com login: `cliente_joao`.\n3. Dados demo: `docker compose exec web python manage.py seed_demo`\n\n## Quem faz o quê\nAbrir OS, enviar orçamento, entregar e cancelar são do **atendente**. Diagnosticar, incluir peça, gerar orçamento e finalizar são do **mecânico**. Cadastro e movimentação de peça são do **estoquista**. Catálogo de serviços é do **admin**. Aprovar e recusar são do **cliente**, e também do atendente, que registra a resposta dada por telefone. Incluir item de serviço vale para mecânico e atendente.\n\n## Fluxo da OS\nO status **não** é um campo de escrita: ele muda como consequência dos comandos de negócio. PATCH com `status` é ignorado.\n\n`Recebida` → POST `/diagnosticar/` → `EmDiagnostico` → incluir itens → POST `/orcamentos/` (não muda o status) → POST `/orcamentos/{id}/enviar/` → `AguardandoAprovacao` → POST `/orcamentos/{id}/aprovar/` → `EmExecucao` → POST `/finalizar/` → `Finalizada` → POST `/entregar/` → `Entregue` (baixa estoque)\n\n## Estoque\nIncluir peça **não** reserva: a reserva acontece na **aprovação do orçamento**, tudo ou nada. Faltando qualquer peça, a aprovação devolve **409** com a lista do que faltou, a oficina é avisada por e-mail e a OS fica parada em `AguardandoAprovacao` até a reposição — o cliente aprova de novo depois. Reserva e baixa que deixem uma peça abaixo do mínimo disparam alerta de reposição.\n\n**Reparo adicional:** com a OS em `EmExecucao`, incluir item → gerar orçamento → enviar → a OS volta para `AguardandoAprovacao` e retorna a `EmExecucao` na aprovação.\n\n**Recusa:** do orçamento inicial cancela a OS e libera as reservas; de um adicional apenas devolve a OS para `EmExecucao`, já que orçamento não aprovado nunca reservou.\n\n**Cancelamento:** POST `/cancelar/` vale até `AguardandoAprovacao`; a partir de `EmExecucao` retorna 400.\n\n## Variáveis da collection\nSalvas automaticamente pelos scripts de teste: `cliente_id`, `veiculo_id`, `os_id`, `servico_id`, `peca_id`, `orcamento_id`, e um token por papel.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -18,14 +18,18 @@
     { "key": "peca_id", "value": "1" },
     { "key": "os_id", "value": "1" },
     { "key": "orcamento_id", "value": "1" },
-    { "key": "user_id", "value": "1" }
+    { "key": "user_id", "value": "1" },
+    { "key": "token_atendente", "value": "" },
+    { "key": "token_mecanico", "value": "" },
+    { "key": "token_estoquista", "value": "" },
+    { "key": "token_admin", "value": "" }
   ],
   "item": [
     {
       "name": "Autenticação",
       "item": [
         {
-          "name": "Obter token (login)",
+          "name": "Login — atendente",
           "event": [{
             "listen": "test",
             "script": {
@@ -34,6 +38,7 @@
                 "if (pm.response.code === 200) {",
                 "    const d = pm.response.json();",
                 "    pm.collectionVariables.set('access_token', d.access);",
+                "    pm.collectionVariables.set('token_atendente', d.access);",
                 "    pm.collectionVariables.set('refresh_token', d.refresh);",
                 "}"
               ]
@@ -47,7 +52,83 @@
               "mode": "raw",
               "raw": "{\n  \"username\": \"atendente\",\n  \"password\": \"senha12345\"\n}"
             },
-            "url": "{{base_url}}/api/token/"
+            "url": "{{base_url}}/api/token/",
+            "description": "Cada comando exige o papel do ator que o executa. Rode também os logins de mecânico, estoquista e cliente: as requisições que precisam deles usam o token próprio."
+          }
+        },
+        {
+          "name": "Login — mecânico",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "if (pm.response.code === 200) {",
+                "    pm.collectionVariables.set('token_mecanico', pm.response.json().access);",
+                "}"
+              ]
+            }
+          }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"mecanico\",\n  \"password\": \"senha12345\"\n}"
+            },
+            "url": "{{base_url}}/api/token/",
+            "description": "Diagnosticar, incluir peça, gerar orçamento e finalizar são do mecânico."
+          }
+        },
+        {
+          "name": "Login — estoquista",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "if (pm.response.code === 200) {",
+                "    pm.collectionVariables.set('token_estoquista', pm.response.json().access);",
+                "}"
+              ]
+            }
+          }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"estoquista\",\n  \"password\": \"senha12345\"\n}"
+            },
+            "url": "{{base_url}}/api/token/",
+            "description": "Cadastro e movimentação de peça são do estoquista."
+          }
+        },
+        {
+          "name": "Login — admin",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "if (pm.response.code === 200) {",
+                "    pm.collectionVariables.set('token_admin', pm.response.json().access);",
+                "}"
+              ]
+            }
+          }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin_ops\",\n  \"password\": \"senha12345\"\n}"
+            },
+            "url": "{{base_url}}/api/token/",
+            "description": "O admin acumula todos os papéis e é o único que altera o catálogo de serviços."
           }
         },
         {
@@ -244,7 +325,8 @@
                 }
               }],
               "request": {
-                "method": "POST",
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_admin}}", "type": "string" }] },
+            "method": "POST",
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
@@ -260,7 +342,8 @@
             {
               "name": "Atualizar serviço",
               "request": {
-                "method": "PATCH",
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_admin}}", "type": "string" }] },
+            "method": "PATCH",
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
@@ -271,7 +354,8 @@
             },
             {
               "name": "Excluir serviço",
-              "request": { "method": "DELETE", "url": "{{base_url}}/api/servicos/{{servico_id}}/" }
+              "request": {"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_admin}}", "type": "string" }] },
+             "method": "DELETE", "url": "{{base_url}}/api/servicos/{{servico_id}}/" }
             }
           ]
         }
@@ -306,6 +390,7 @@
             }
           }],
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_estoquista}}", "type": "string" }] },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
@@ -322,6 +407,7 @@
         {
           "name": "Atualizar peça",
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_estoquista}}", "type": "string" }] },
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
@@ -333,7 +419,8 @@
         },
         {
           "name": "Excluir peça",
-          "request": { "method": "DELETE", "url": "{{base_url}}/api/pecas/{{peca_id}}/" }
+          "request": {"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_estoquista}}", "type": "string" }] },
+             "method": "DELETE", "url": "{{base_url}}/api/pecas/{{peca_id}}/" }
         }
       ]
     },
@@ -378,6 +465,7 @@
         {
           "name": "Registrar diagnóstico (→ EmDiagnostico)",
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
@@ -391,6 +479,7 @@
         {
           "name": "Finalizar OS (→ Finalizada)",
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
             "method": "POST",
             "url": "{{base_url}}/api/ordens-servico/{{os_id}}/finalizar/",
             "description": "Comando Finalizar OS. Só a partir de EmExecucao; carimba data_finalizacao."
@@ -463,16 +552,17 @@
               "request": { "method": "GET", "url": "{{base_url}}/api/itens-peca/" }
             },
             {
-              "name": "Incluir peça na OS (reserva estoque)",
+              "name": "Incluir peça na OS (não reserva ainda)",
               "request": {
-                "method": "POST",
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
+            "method": "POST",
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"ordem_servico\": {{os_id}},\n  \"peca\": {{peca_id}},\n  \"quantidade\": 2\n}"
                 },
                 "url": "{{base_url}}/api/itens-peca/",
-                "description": "Reserva estoque automaticamente. Retorna 400 se estoque insuficiente."
+                "description": "Inclui a peça e congela o preço. NÃO reserva estoque: a reserva acontece na aprovação do orçamento. Por isso é possível incluir mais do que há em saldo — a falta só aparece ao aprovar."
               }
             },
             {
@@ -504,6 +594,7 @@
             }
           }],
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
@@ -531,7 +622,7 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/aprovar/",
-            "description": "Aprova o orçamento e move a OS para EmExecucao, carimbando data_inicio_execucao."
+            "description": "Aprova o orçamento, RESERVA as peças no estoque e move a OS para EmExecucao. Se faltar peça, devolve 409 com a lista do que faltou, avisa a oficina por e-mail e deixa a OS parada em AguardandoAprovacao — o cliente aprova de novo depois da reposição."
           }
         },
         {
@@ -539,7 +630,7 @@
           "request": {
             "method": "POST",
             "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/recusar/",
-            "description": "Recusa do orçamento inicial (sequencia 1): cancela a OS e libera todas as peças reservadas. Recusa de um adicional: devolve a OS para EmExecucao e libera apenas as peças daquele orçamento."
+            "description": "Recusa do orçamento inicial (sequencia 1): cancela a OS e libera as peças reservadas. Recusa de um adicional: devolve a OS para EmExecucao. O adicional não tinha reserva, porque orçamento não aprovado nunca reserva."
           }
         }
       ]
@@ -620,6 +711,7 @@
             }
           }],
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\"diagnostico\":\"Correia desgastada\"}" },
@@ -629,6 +721,7 @@
         {
           "name": "4 — Incluir serviço",
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\"ordem_servico\":{{os_id}},\"servico\":1,\"quantidade\":1}" },
@@ -638,6 +731,7 @@
         {
           "name": "5 — Incluir peça",
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\"ordem_servico\":{{os_id}},\"peca\":1,\"quantidade\":1}" },
@@ -664,6 +758,7 @@
             }
           }],
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\"ordem_servico\":{{os_id}}}" },
@@ -697,6 +792,7 @@
         {
           "name": "9 — Finalizar OS",
           "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_mecanico}}", "type": "string" }] },
             "method": "POST",
             "url": "{{base_url}}/api/ordens-servico/{{os_id}}/finalizar/"
           }
