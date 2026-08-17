@@ -5,13 +5,32 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.permissions import (
+    IsAdmin,
+    IsAtendente,
+    IsMecanico,
+    PermissoesPorAcaoMixin,
+)
 from so.models import OrdemServico, StatusOS
 from so.serializers import OrdemServicoSerializer
 
 
-class OrdemServicoViewSet(viewsets.ModelViewSet):
+class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
     serializer_class = OrdemServicoSerializer
     permission_classes = [IsAuthenticated]
+
+    # Cada comando pertence ao ator que o executa na oficina. Listar e detalhar
+    # ficam abertos: o get_queryset limita o cliente às próprias OS.
+    permissoes_por_acao = {
+        'create': [IsAtendente],
+        'update': [IsAtendente],
+        'partial_update': [IsAtendente],
+        'destroy': [IsAdmin],
+        'diagnosticar': [IsMecanico],
+        'finalizar': [IsMecanico],
+        'entregar': [IsAtendente],
+        'cancelar': [IsAtendente],
+    }
 
     def get_queryset(self):
         queryset = (

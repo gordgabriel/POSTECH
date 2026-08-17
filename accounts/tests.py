@@ -15,23 +15,49 @@ from accounts.permissions import (
 )
 
 class APITestCaseBase(APITestCase):
-    """Autentica um operador (atendente) para os testes de API."""
+    """
+    Autentica um admin, que acumula todos os papéis.
+
+    Os testes de fluxo verificam comportamento de domínio, não autorização;
+    autenticar por papel em cada um deles só acrescentaria ruído. Quem cobre a
+    matriz papel x operação é PermissoesPorPapelTests, em so/tests.py.
+    Use autenticar_como() quando o papel importar para o teste.
+    """
 
     def setUp(self):
-        self.operador = UserModel.objects.create_user(
-            username='atendente',
-            email='atendente@test.com',
+        self.operador = self.criar_operador('admin_ops', UserModel.Tipo.ADMIN)
+        self.autenticar(self.operador)
+
+    def criar_operador(self, username, tipo):
+        return UserModel.objects.create_user(
+            username=username,
+            email=f'{username}@test.com',
             password='senha12345',
-            type=UserModel.Tipo.ATENDENTE,
+            type=tipo,
         )
-        login_response = self.client.post(
+
+    def autenticar(self, usuario):
+        self.client.force_authenticate(user=usuario)
+        return usuario
+
+    def autenticar_como(self, tipo):
+        usuario = UserModel.objects.filter(type=tipo).first() or self.criar_operador(
+            f'op_{tipo}', tipo,
+        )
+        return self.autenticar(usuario)
+
+    def autenticar_por_jwt(self, username='admin_ops', senha='senha12345'):
+        """Autenticação real pela rota de token, para o que precisa do JWT."""
+        self.client.force_authenticate(user=None)
+        resposta = self.client.post(
             reverse('token_obtain_pair'),
-            {'username': 'atendente', 'password': 'senha12345'},
+            {'username': username, 'password': senha},
             format='json',
         )
         self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {login_response.data['access']}",
+            HTTP_AUTHORIZATION=f"Bearer {resposta.data['access']}",
         )
+        return resposta
 
 
 class HealthCheckTests(APITestCase):
@@ -78,8 +104,8 @@ class ProfileTests(APITestCaseBase):
     def test_profile_retorna_usuario_logado(self):
         response = self.client.get('/api/profile/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['username'], 'atendente')
-        self.assertEqual(response.data['type'], 'atendente')
+        self.assertEqual(response.data['username'], self.operador.username)
+        self.assertEqual(response.data['type'], self.operador.type)
 
 
 class UserModelTests(APITestCase):
@@ -257,7 +283,7 @@ class UserViewSetTests(APITestCaseBase):
 
         response = self.client.get(f'/api/users/{self.operador.id}/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['username'], 'atendente')
+        self.assertEqual(response.data['username'], self.operador.username)
 
     def test_admin_lista_todos_usuarios(self):
         admin = UserModel.objects.create_superuser(

@@ -540,6 +540,207 @@ class EstoqueIntegracaoTests(OSTestCaseBase):
         self.assertEqual(str(item), f'2x {self.peca.nome}')
 
 
+class PermissoesPorPapelTests(OSTestCaseBase):
+    """Matriz papel x operação da seção 4 da Linguagem Ubíqua."""
+
+    def setUp(self):
+        super().setUp()
+        self.atendente = self.criar_operador('ate', UserModel.Tipo.ATENDENTE)
+        self.mecanico = self.criar_operador('mec', UserModel.Tipo.MECANICO)
+        self.estoquista = self.criar_operador('est', UserModel.Tipo.ESTOQUISTA)
+        self.usuario_cliente = UserModel.objects.create_user(
+            username='cliente_joao',
+            email='cliente.joao@test.com',
+            password='senha12345',
+        )
+        self.cliente.usuario = self.usuario_cliente
+        self.cliente.save()
+        self.os = self.criar_os()
+
+    def como(self, usuario, metodo, url, dados=None):
+        self.autenticar(usuario)
+        chamada = getattr(self.client, metodo)
+        if dados is None:
+            return chamada(url)
+        return chamada(url, dados, format='json')
+
+    def assertPermite(self, usuario, metodo, url, dados=None):
+        resposta = self.como(usuario, metodo, url, dados)
+        self.assertNotIn(
+            resposta.status_code,
+            (status.HTTP_403_FORBIDDEN, status.HTTP_401_UNAUTHORIZED),
+            msg=f'{usuario.type or "cliente"} foi barrado em {metodo.upper()} {url}',
+        )
+        return resposta
+
+    def assertBloqueia(self, usuario, metodo, url, dados=None):
+        resposta = self.como(usuario, metodo, url, dados)
+        self.assertIn(
+            resposta.status_code,
+            (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
+            msg=(
+                f'{usuario.type or "cliente"} NAO foi barrado em '
+                f'{metodo.upper()} {url}: HTTP {resposta.status_code}'
+            ),
+        )
+        return resposta
+
+    # ------------------------------------------------------------ comandos da OS
+    def test_abrir_os_e_do_atendente(self):
+        dados = {
+            'descricao': 'nova',
+            'cliente': self.cliente.id,
+            'veiculo': self.veiculo.id,
+        }
+        self.assertPermite(self.atendente, 'post', '/api/ordens-servico/', dados)
+        for usuario in (self.mecanico, self.estoquista, self.usuario_cliente):
+            self.assertBloqueia(usuario, 'post', '/api/ordens-servico/', dados)
+
+    def test_diagnosticar_e_do_mecanico(self):
+        url = f'/api/ordens-servico/{self.os.id}/diagnosticar/'
+        dados = {'diagnostico': 'correia'}
+        for usuario in (self.atendente, self.estoquista, self.usuario_cliente):
+            self.assertBloqueia(usuario, 'post', url, dados)
+        self.assertPermite(self.mecanico, 'post', url, dados)
+
+    def test_finalizar_e_do_mecanico(self):
+        url = f'/api/ordens-servico/{self.os.id}/finalizar/'
+        for usuario in (self.atendente, self.estoquista, self.usuario_cliente):
+            self.assertBloqueia(usuario, 'post', url)
+
+    def test_entregar_e_cancelar_sao_do_atendente(self):
+        for comando in ('entregar', 'cancelar'):
+            url = f'/api/ordens-servico/{self.os.id}/{comando}/'
+            for usuario in (self.mecanico, self.estoquista, self.usuario_cliente):
+                self.assertBloqueia(usuario, 'post', url)
+
+    def test_cliente_nao_finaliza_nem_entrega_a_propria_os(self):
+        """Era a falha mais grave: o cliente dava baixa no estoque da oficina."""
+        for comando in ('finalizar', 'entregar'):
+            self.assertBloqueia(
+                self.usuario_cliente,
+                'post',
+                f'/api/ordens-servico/{self.os.id}/{comando}/',
+            )
+
+    # ------------------------------------------------------------ itens e orçamento
+    def test_incluir_item_e_do_mecanico(self):
+        dados = {
+            'ordem_servico': self.os.id,
+            'servico': self.servico.id,
+            'quantidade': 1,
+        }
+        self.assertPermite(self.mecanico, 'post', '/api/itens-servico/', dados)
+        for usuario in (self.atendente, self.estoquista, self.usuario_cliente):
+            self.assertBloqueia(usuario, 'post', '/api/itens-servico/', dados)
+
+    def test_gerar_e_do_mecanico_enviar_e_do_atendente(self):
+        self.os.status = StatusOS.EM_DIAGNOSTICO
+        self.os.save()
+        ItemServicoOS.objects.create(
+            ordem_servico=self.os,
+            servico=self.servico,
+            quantidade=1,
+            preco_unitario=self.servico.preco,
+        )
+        dados = {'ordem_servico': self.os.id}
+        self.assertBloqueia(self.atendente, 'post', '/api/orcamentos/', dados)
+        resposta = self.assertPermite(self.mecanico, 'post', '/api/orcamentos/', dados)
+        orcamento_id = resposta.data['id']
+
+        url = f'/api/orcamentos/{orcamento_id}/enviar/'
+        self.assertBloqueia(self.mecanico, 'post', url)
+        self.assertPermite(self.atendente, 'post', url)
+
+    def test_aprovar_e_do_cliente_ou_do_atendente(self):
+        self.os.status = StatusOS.EM_DIAGNOSTICO
+        self.os.save()
+        ItemServicoOS.objects.create(
+            ordem_servico=self.os,
+            servico=self.servico,
+            quantidade=1,
+            preco_unitario=self.servico.preco,
+        )
+        orcamento = Orcamento.gerar_para_os(self.os)
+        self.autenticar(self.atendente)
+        self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
+
+        self.assertBloqueia(
+            self.mecanico, 'post', f'/api/orcamentos/{orcamento.id}/aprovar/',
+        )
+        self.assertPermite(
+            self.usuario_cliente, 'post', f'/api/orcamentos/{orcamento.id}/aprovar/',
+        )
+
+    # ------------------------------------------------------------ cadastros
+    def test_cliente_nao_enxerga_cadastro_de_terceiros(self):
+        """O vazamento de CPF/CNPJ: a listagem não pode devolver todo mundo."""
+        outro = Cliente.objects.create(
+            cpf_cnpj='11.444.777/0001-61',
+            nome='Outra Pessoa',
+            email='outra@test.com',
+        )
+        self.autenticar(self.usuario_cliente)
+        resposta = self.client.get('/api/clientes/')
+        self.assertEqual(resposta.status_code, status.HTTP_200_OK)
+        ids = [c['id'] for c in resposta.data]
+        self.assertEqual(ids, [self.cliente.id])
+        self.assertNotIn(outro.id, ids)
+
+        self.assertBloqueia(self.usuario_cliente, 'get', f'/api/clientes/{outro.id}/')
+
+    def test_operador_enxerga_todos_os_clientes(self):
+        self.autenticar(self.mecanico)
+        resposta = self.client.get('/api/clientes/')
+        self.assertEqual(len(resposta.data), Cliente.objects.count())
+
+    def test_escrita_de_cadastro_e_do_atendente(self):
+        dados = {
+            'cpf_cnpj': '390.533.447-05',
+            'nome': 'Maria',
+            'email': 'maria@test.com',
+        }
+        self.assertPermite(self.atendente, 'post', '/api/clientes/', dados)
+        for usuario in (self.mecanico, self.estoquista, self.usuario_cliente):
+            self.assertBloqueia(usuario, 'post', '/api/clientes/', dados)
+
+    def test_catalogo_de_servico_so_o_admin_altera(self):
+        dados = {'nome': 'Novo', 'preco': '10.00', 'tempo_execucao': 5}
+        for usuario in (self.atendente, self.mecanico, self.usuario_cliente):
+            self.assertBloqueia(usuario, 'post', '/api/servicos/', dados)
+        self.assertPermite(self.operador, 'post', '/api/servicos/', dados)
+
+    def test_cliente_nao_altera_preco_do_catalogo(self):
+        self.assertBloqueia(
+            self.usuario_cliente,
+            'patch',
+            f'/api/servicos/{self.servico.id}/',
+            {'preco': '0.01'},
+        )
+
+    # ------------------------------------------------------------ estoque
+    def test_estoque_e_do_estoquista_e_invisivel_ao_cliente(self):
+        dados = {'nome': 'Peça nova', 'preco': '10.00', 'quantidade': 5}
+        self.assertPermite(self.estoquista, 'post', '/api/pecas/', dados)
+        for usuario in (self.atendente, self.mecanico, self.usuario_cliente):
+            self.assertBloqueia(usuario, 'post', '/api/pecas/', dados)
+
+        self.assertBloqueia(self.usuario_cliente, 'get', '/api/pecas/')
+        self.assertBloqueia(
+            self.usuario_cliente,
+            'patch',
+            f'/api/pecas/{self.peca.id}/',
+            {'quantidade': 9999},
+        )
+        self.assertPermite(self.mecanico, 'get', '/api/pecas/')
+
+    def test_relatorio_e_so_para_operador(self):
+        url = '/api/relatorios/tempo-medio-execucao/'
+        self.assertBloqueia(self.usuario_cliente, 'get', url)
+        for usuario in (self.atendente, self.mecanico, self.estoquista):
+            self.assertPermite(usuario, 'get', url)
+
+
 class RemocaoProtegidaTests(OSTestCaseBase):
     """PROTECT preserva o histórico; a API deve dizer 409, não estourar 500."""
 

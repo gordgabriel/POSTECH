@@ -4,11 +4,18 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.permissions import (
+    IsAtendente,
+    IsCliente,
+    IsMecanico,
+    PermissoesPorAcaoMixin,
+    has_any_role,
+)
 from so.models import Orcamento
 from so.serializers import OrcamentoSerializer
 
 
-class OrcamentoViewSet(viewsets.ModelViewSet):
+class OrcamentoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
     queryset = (
         Orcamento.objects.select_related('ordem_servico')
         .prefetch_related('itens_servico', 'itens_peca')
@@ -17,6 +24,16 @@ class OrcamentoViewSet(viewsets.ModelViewSet):
     serializer_class = OrcamentoSerializer
     permission_classes = [IsAuthenticated]
     http_method_names = ['get', 'post', 'head', 'options']
+
+    # A resposta é do cliente, mas o atendente a registra quando ela chega por
+    # telefone ou balcão; o get_queryset impede o cliente de tocar orçamento alheio.
+    _RESPONDER = [has_any_role(IsCliente, IsAtendente)]
+    permissoes_por_acao = {
+        'create': [IsMecanico],
+        'enviar': [IsAtendente],
+        'aprovar': _RESPONDER,
+        'recusar': _RESPONDER,
+    }
 
     def get_queryset(self):
         queryset = super().get_queryset()

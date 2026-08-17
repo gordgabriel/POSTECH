@@ -54,3 +54,15 @@ def has_any_role(*roles: type[BasePermission]) -> type[BasePermission]:
             return any(role().has_permission(request, view) for role in roles)
 
     return _AnyRole
+
+
+class PermissoesPorAcaoMixin:
+    """Aplica o papel exigido por ação; o resto cai em permission_classes."""
+
+    permissoes_por_acao: dict = {}
+
+    def get_permissions(self):
+        classes = self.permissoes_por_acao.get(self.action)
+        if classes is None:
+            return super().get_permissions()
+        return [classe() for classe in classes]

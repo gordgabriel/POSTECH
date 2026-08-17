@@ -2,10 +2,10 @@ from datetime import timedelta
 
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import is_naive, make_aware
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.permissions import IsOperador
 from so.models import OrdemServico
 
 
@@ -15,7 +15,7 @@ class TempoMedioExecucaoView(APIView):
     Filtros opcionais: ?de=2026-01-01T00:00:00&ate=2026-12-31T23:59:59
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsOperador]
 
     @staticmethod
     def _parse(valor):
