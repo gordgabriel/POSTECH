@@ -171,9 +171,10 @@ class Orcamento(models.Model):
         if aprovado:
             os_.transitar_para(StatusOS.EM_EXECUCAO)
         elif self.sequencia == 1:
-            # Recusa do inicial: não há reparo autorizado a executar.
-            # O save() da OS libera as reservas ao entrar em Cancelada.
-            os_.transitar_para(StatusOS.CANCELADA)
+            # Recusa do inicial: a OS volta para diagnóstico, onde o mecânico
+            # revê os itens e monta outra proposta. Se o cliente desistir de
+            # vez, o atendente encerra a OS.
+            os_.transitar_para(StatusOS.EM_DIAGNOSTICO)
         else:
             # Recusa de adicional: nada a liberar, porque orçamento não
             # aprovado nunca reservou. A OS retoma o que já foi aprovado.

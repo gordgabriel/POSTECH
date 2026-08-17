@@ -563,19 +563,25 @@ class EstoqueIntegracaoTests(OSTestCaseBase):
         self.assertEqual(self.peca.quantidade, 8)
         self.assertEqual(self.peca.quantidade_reservada, 0)
 
-    def test_libera_reserva_ao_cancelar_os(self):
+    def test_encerrar_os_libera_reserva(self):
         self.item(2)
         self.aprovar()
-        # A OS foi para EmExecucao na aprovação; volta a etapa cancelável.
-        OrdemServico.objects.filter(pk=self.os.pk).update(
-            status=StatusOS.AGUARDANDO_APROVACAO,
-        )
         self.os.refresh_from_db()
-        self.os.transitar_para(StatusOS.CANCELADA)
+        self.assertEqual(self.peca_reservada(), 2)
 
+        self.os.encerrar()
+
+        self.os.refresh_from_db()
         self.peca.refresh_from_db()
+        self.assertFalse(self.os.is_active)
+        # Encerrar não é etapa: o status guarda até onde o atendimento chegou.
+        self.assertEqual(self.os.status, StatusOS.EM_EXECUCAO)
         self.assertEqual(self.peca.quantidade_reservada, 0)
         self.assertEqual(self.peca.quantidade, 10)
+
+    def peca_reservada(self):
+        self.peca.refresh_from_db()
+        return self.peca.quantidade_reservada
 
     def test_preco_unitario_vem_do_catalogo_quando_nulo(self):
         item = ItemPecaOS.objects.create(
@@ -1150,7 +1156,8 @@ class RespostaOrcamentoTests(OSTestCaseBase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         return response
 
-    def test_recusa_do_orcamento_inicial_cancela_os_e_libera_reserva(self):
+    def test_recusa_do_orcamento_inicial_devolve_para_diagnostico(self):
+        """O cliente achou caro: o mecânico revê os itens e propõe de novo."""
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
         self.item_peca(os_, 3)
         orcamento = self.orcamento_enviado(os_)
@@ -1161,7 +1168,9 @@ class RespostaOrcamentoTests(OSTestCaseBase):
 
         os_.refresh_from_db()
         self.peca.refresh_from_db()
-        self.assertEqual(os_.status, StatusOS.CANCELADA)
+        self.assertEqual(os_.status, StatusOS.EM_DIAGNOSTICO)
+        self.assertTrue(os_.is_active)
+        # Nada estava reservado: orçamento recusado nunca foi aprovado.
         self.assertEqual(self.peca.quantidade_reservada, 0)
         self.assertEqual(self.peca.quantidade, 10)
 
@@ -1268,7 +1277,7 @@ class ComandosOrdemServicoTests(OSTestCaseBase):
         os_.refresh_from_db()
         self.assertEqual(os_.status, StatusOS.RECEBIDA)
 
-    def test_cancelar_os_libera_reserva(self):
+    def test_encerrar_os_libera_reserva_e_mantem_o_status(self):
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
         self.incluir_peca(os_)
         orcamento = Orcamento.gerar_para_os(os_)
@@ -1277,21 +1286,64 @@ class ComandosOrdemServicoTests(OSTestCaseBase):
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 2)
 
-        # Volta à etapa cancelável: a aprovação levou a OS para EmExecucao.
-        OrdemServico.objects.filter(pk=os_.pk).update(
-            status=StatusOS.AGUARDANDO_APROVACAO,
-        )
-        response = self.client.post(f'/api/ordens-servico/{os_.id}/cancelar/')
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/encerrar/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['status'], StatusOS.CANCELADA)
+        self.assertFalse(response.data['is_active'])
+        # O status não muda: ele registra até onde o atendimento chegou.
+        self.assertEqual(response.data['status'], StatusOS.EM_EXECUCAO)
 
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 0)
         self.assertEqual(self.peca.quantidade, 10)
 
-    def test_cancelar_os_em_execucao_retorna_400(self):
-        os_ = self.criar_os(status=StatusOS.EM_EXECUCAO)
-        response = self.client.post(f'/api/ordens-servico/{os_.id}/cancelar/')
+    def test_encerrar_os_recebida(self):
+        os_ = self.criar_os()
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/encerrar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['is_active'])
+        self.assertEqual(response.data['status'], StatusOS.RECEBIDA)
+
+    def test_encerrar_duas_vezes_retorna_400(self):
+        os_ = self.criar_os()
+        self.client.post(f'/api/ordens-servico/{os_.id}/encerrar/')
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/encerrar/')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        os_.refresh_from_db()
-        self.assertEqual(os_.status, StatusOS.EM_EXECUCAO)
+
+    def test_os_encerrada_sai_da_listagem(self):
+        ativa = self.criar_os()
+        encerrada = self.criar_os()
+        self.client.post(f'/api/ordens-servico/{encerrada.id}/encerrar/')
+
+        ids = [o['id'] for o in self.client.get('/api/ordens-servico/').data]
+        self.assertIn(ativa.id, ids)
+        self.assertNotIn(encerrada.id, ids)
+
+        ids = [
+            o['id']
+            for o in self.client.get('/api/ordens-servico/?is_active=false').data
+        ]
+        self.assertIn(encerrada.id, ids)
+        self.assertNotIn(ativa.id, ids)
+
+        ids = [
+            o['id']
+            for o in self.client.get('/api/ordens-servico/?is_active=todas').data
+        ]
+        self.assertIn(ativa.id, ids)
+        self.assertIn(encerrada.id, ids)
+
+    def test_encerrada_continua_acessivel_pelo_id(self):
+        """Sai da listagem, mas o histórico não some."""
+        os_ = self.criar_os()
+        self.client.post(f'/api/ordens-servico/{os_.id}/encerrar/')
+        response = self.client.get(f'/api/ordens-servico/{os_.id}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['is_active'])
+
+    def test_encerrar_os_entregue_retorna_400(self):
+        """OS entregue está concluída: o serviço foi prestado."""
+        os_ = self.criar_os(status=StatusOS.FINALIZADA)
+        os_.transitar_para(StatusOS.ENTREGUE)
+        response = self.client.post(f'/api/ordens-servico/{os_.id}/encerrar/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)

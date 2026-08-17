@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Oficina Mecânica — So PosTech API v2",
-    "description": "Collection do fluxo de Ordem de Serviço, controle de estoque e relatórios.\n\n## Setup rápido\n1. Rode **os quatro logins** da pasta Autenticação: atendente, mecânico, estoquista e admin. Cada comando exige o papel do ator que o executa, e as requisições já usam o token certo.\n2. Operadores (senha `senha12345`): `atendente`, `mecanico`, `estoquista`, `admin_ops`. Cliente com login: `cliente_joao`.\n3. Dados demo: `docker compose exec web python manage.py seed_demo`\n\n## Quem faz o quê\nAbrir OS, enviar orçamento, entregar e cancelar são do **atendente**. Diagnosticar, incluir peça, gerar orçamento e finalizar são do **mecânico**. Cadastro e movimentação de peça são do **estoquista**. Catálogo de serviços é do **admin**. Aprovar e recusar são do **cliente**, e também do atendente, que registra a resposta dada por telefone. Incluir item de serviço vale para mecânico e atendente.\n\n## Fluxo da OS\nO status **não** é um campo de escrita: ele muda como consequência dos comandos de negócio. PATCH com `status` é ignorado.\n\n`Recebida` → POST `/diagnosticar/` → `EmDiagnostico` → incluir itens → POST `/orcamentos/` (não muda o status) → POST `/orcamentos/{id}/enviar/` → `AguardandoAprovacao` → POST `/orcamentos/{id}/aprovar/` → `EmExecucao` → POST `/finalizar/` → `Finalizada` → POST `/entregar/` → `Entregue` (baixa estoque)\n\n## Estoque\nIncluir peça **não** reserva: a reserva acontece na **aprovação do orçamento**, tudo ou nada. Faltando qualquer peça, a aprovação devolve **409** com a lista do que faltou, a oficina é avisada por e-mail e a OS fica parada em `AguardandoAprovacao` até a reposição — o cliente aprova de novo depois. Reserva e baixa que deixem uma peça abaixo do mínimo disparam alerta de reposição.\n\n**Reparo adicional:** com a OS em `EmExecucao`, incluir item → gerar orçamento → enviar → a OS volta para `AguardandoAprovacao` e retorna a `EmExecucao` na aprovação.\n\n**Recusa:** do orçamento inicial cancela a OS e libera as reservas; de um adicional apenas devolve a OS para `EmExecucao`, já que orçamento não aprovado nunca reservou.\n\n**Cancelamento:** POST `/cancelar/` vale até `AguardandoAprovacao`; a partir de `EmExecucao` retorna 400.\n\n## Variáveis da collection\nSalvas automaticamente pelos scripts de teste: `cliente_id`, `veiculo_id`, `os_id`, `servico_id`, `peca_id`, `orcamento_id`, e um token por papel.",
+    "description": "Collection do fluxo de Ordem de Serviço, controle de estoque e relatórios.\n\n## Setup rápido\n1. Rode **os quatro logins** da pasta Autenticação: atendente, mecânico, estoquista e admin. Cada comando exige o papel do ator que o executa, e as requisições já usam o token certo.\n2. Operadores (senha `senha12345`): `atendente`, `mecanico`, `estoquista`, `admin_ops`. Cliente com login: `cliente_joao`.\n3. Dados demo: `docker compose exec web python manage.py seed_demo`\n\n## Quem faz o quê\nAbrir OS, enviar orçamento, entregar e encerrar são do **atendente**. Diagnosticar, incluir peça, gerar orçamento e finalizar são do **mecânico**. Cadastro e movimentação de peça são do **estoquista**. Catálogo de serviços é do **admin**. Aprovar e recusar são do **cliente**, e também do atendente, que registra a resposta dada por telefone. Incluir item de serviço vale para mecânico e atendente.\n\n## Fluxo da OS\nO status **não** é um campo de escrita: ele muda como consequência dos comandos de negócio. PATCH com `status` é ignorado.\n\n`Recebida` → POST `/diagnosticar/` → `EmDiagnostico` → incluir itens → POST `/orcamentos/` (não muda o status) → POST `/orcamentos/{id}/enviar/` → `AguardandoAprovacao` → POST `/orcamentos/{id}/aprovar/` → `EmExecucao` → POST `/finalizar/` → `Finalizada` → POST `/entregar/` → `Entregue` (baixa estoque)\n\n## Estoque\nIncluir peça **não** reserva: a reserva acontece na **aprovação do orçamento**, tudo ou nada. Faltando qualquer peça, a aprovação devolve **409** com a lista do que faltou, a oficina é avisada por e-mail e a OS fica parada em `AguardandoAprovacao` até a reposição — o cliente aprova de novo depois. Reserva e baixa que deixem uma peça abaixo do mínimo disparam alerta de reposição.\n\n**Reparo adicional:** com a OS em `EmExecucao`, incluir item → gerar orçamento → enviar → a OS volta para `AguardandoAprovacao` e retorna a `EmExecucao` na aprovação.\n\n**Recusa:** do orçamento inicial devolve a OS para `EmDiagnostico`, para o mecânico refazer a proposta; de um adicional devolve para `EmExecucao`. Nenhuma libera reserva, já que orçamento não aprovado nunca reservou.\n\n**Encerramento:** POST `/encerrar/` dá baixa no registro (`is_active=false`) e libera as reservas, sem mexer no status. A listagem passa a esconder as encerradas; use `?is_active=false` para vê-las, ou `?is_active=todas` para tudo.\n\n## Variáveis da collection\nSalvas automaticamente pelos scripts de teste: `cliente_id`, `veiculo_id`, `os_id`, `servico_id`, `peca_id`, `orcamento_id`, e um token por papel.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -494,11 +494,11 @@
           }
         },
         {
-          "name": "Cancelar OS (→ Cancelada, libera reservas)",
+          "name": "Encerrar OS (baixa o registro, libera reservas)",
           "request": {
             "method": "POST",
-            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/cancelar/",
-            "description": "Comando Cancelar OS. Válido até AguardandoAprovacao; a partir de EmExecucao retorna 400. Libera as peças reservadas."
+            "url": "{{base_url}}/api/ordens-servico/{{os_id}}/encerrar/",
+            "description": "Baixa do atendimento: is_active passa a false, as peças reservadas voltam ao estoque e o cliente é avisado. NÃO muda o status — ele continua marcando até onde o atendimento chegou. OS já entregue não se encerra."
           }
         },
         {
@@ -626,11 +626,11 @@
           }
         },
         {
-          "name": "Recusar orçamento (→ Cancelada ou volta a EmExecucao)",
+          "name": "Recusar orçamento (volta a EmDiagnostico ou EmExecucao)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/recusar/",
-            "description": "Recusa do orçamento inicial (sequencia 1): cancela a OS e libera as peças reservadas. Recusa de um adicional: devolve a OS para EmExecucao. O adicional não tinha reserva, porque orçamento não aprovado nunca reserva."
+            "description": "Recusa do orçamento inicial (sequencia 1): devolve a OS para EmDiagnostico, onde o mecânico revê os itens e monta outra proposta. Recusa de um adicional: devolve a OS para EmExecucao. Nenhuma das duas libera reserva, porque orçamento não aprovado nunca reserva."
           }
         }
       ]

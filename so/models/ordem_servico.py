@@ -10,25 +10,31 @@ from estoque.services import EstoqueService
 
 
 class StatusOS(models.TextChoices):
+    """As seis etapas do atendimento. Encerrar uma OS não é etapa: é baixa,
+    registrada em is_active, e o status guarda até onde o serviço chegou."""
+
     RECEBIDA = 'Recebida', 'Recebida'
     EM_DIAGNOSTICO = 'EmDiagnostico', 'Em diagnóstico'
     AGUARDANDO_APROVACAO = 'AguardandoAprovacao', 'Aguardando aprovação'
     EM_EXECUCAO = 'EmExecucao', 'Em execução'
     FINALIZADA = 'Finalizada', 'Finalizada'
     ENTREGUE = 'Entregue', 'Entregue'
-    CANCELADA = 'Cancelada', 'Cancelada'
 
 
-# Invariante: o status só transita na sequência válida.
-# EmExecucao -> AguardandoAprovacao cobre o reparo adicional (novo orçamento).
+# Invariante: o status só transita na sequência válida. Há dois retornos:
+# EmExecucao -> AguardandoAprovacao no reparo adicional, e
+# AguardandoAprovacao -> EmDiagnostico quando o cliente recusa o orçamento e
+# o mecânico refaz a proposta.
 TRANSICOES_VALIDAS = {
-    StatusOS.RECEBIDA: {StatusOS.EM_DIAGNOSTICO, StatusOS.CANCELADA},
-    StatusOS.EM_DIAGNOSTICO: {StatusOS.AGUARDANDO_APROVACAO, StatusOS.CANCELADA},
-    StatusOS.AGUARDANDO_APROVACAO: {StatusOS.EM_EXECUCAO, StatusOS.CANCELADA},
+    StatusOS.RECEBIDA: {StatusOS.EM_DIAGNOSTICO},
+    StatusOS.EM_DIAGNOSTICO: {StatusOS.AGUARDANDO_APROVACAO},
+    StatusOS.AGUARDANDO_APROVACAO: {
+        StatusOS.EM_EXECUCAO,
+        StatusOS.EM_DIAGNOSTICO,
+    },
     StatusOS.EM_EXECUCAO: {StatusOS.FINALIZADA, StatusOS.AGUARDANDO_APROVACAO},
     StatusOS.FINALIZADA: {StatusOS.ENTREGUE},
     StatusOS.ENTREGUE: set(),
-    StatusOS.CANCELADA: set(),
 }
 
 # Cada transição alimenta a data que sustenta o relatório de tempo médio.
@@ -106,9 +112,34 @@ class OrdemServico(models.Model):
             setattr(self, campo_data, timezone.now())
         self.save()
 
+    def encerrar(self):
+        """
+        Baixa do atendimento: o registro sai de circulação e o histórico fica.
+
+        Encerrar não é etapa do serviço, por isso não mexe no status — ele
+        continua marcando até onde o atendimento chegou antes de ser encerrado.
+        As peças reservadas voltam ao estoque.
+        """
+        if not self.is_active:
+            raise ValidationError({'is_active': 'Esta OS já está encerrada.'})
+        if self.status == StatusOS.ENTREGUE:
+            raise ValidationError({
+                'is_active': (
+                    'OS entregue está concluída e não se encerra: o serviço '
+                    'foi prestado.'
+                ),
+            })
+
+        self.is_active = False
+        self.save(update_fields=['is_active', 'updated_at'])
+        EstoqueService.liberar_itens_os(self)
+
+        from notifications.services.os_notifications import notificar_os_encerrada
+        notificar_os_encerrada(self)
+        return self
+
     def save(self, *args, **kwargs):
         baixar_estoque = False
-        liberar_estoque = False
         status_anterior = None
         notificar = False
 
@@ -123,8 +154,6 @@ class OrdemServico(models.Model):
                     setattr(self, campo_data, timezone.now())
                 if self.status == StatusOS.ENTREGUE:
                     baixar_estoque = True
-                elif self.status == StatusOS.CANCELADA:
-                    liberar_estoque = True
                 notificar = True
 
         super().save(*args, **kwargs)
@@ -135,8 +164,6 @@ class OrdemServico(models.Model):
 
         if baixar_estoque:
             EstoqueService.baixar_itens_os(self)
-        elif liberar_estoque:
-            EstoqueService.liberar_itens_os(self)
 
     def __str__(self):
         return f'OS {self.uuid} - {self.get_status_display()}'

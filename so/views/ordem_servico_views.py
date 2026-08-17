@@ -29,7 +29,7 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         'diagnosticar': [IsMecanico],
         'finalizar': [IsMecanico],
         'entregar': [IsAtendente],
-        'cancelar': [IsAtendente],
+        'encerrar': [IsAtendente],
     }
 
     def get_queryset(self):
@@ -38,10 +38,22 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
             .prefetch_related('itens_servico', 'itens_peca', 'orcamentos')
             .order_by('-data_abertura')
         )
-        if self.request.user.is_operador:
+        if not self.request.user.is_operador:
+            # Cliente com login só enxerga as próprias OS.
+            queryset = queryset.filter(cliente__usuario=self.request.user)
+        return self._filtrar_por_atividade(queryset)
+
+    def _filtrar_por_atividade(self, queryset):
+        """OS encerrada sai de circulação; ?is_active=false traz o histórico."""
+        if self.action != 'list':
             return queryset
-        # Cliente com login só enxerga as próprias OS.
-        return queryset.filter(cliente__usuario=self.request.user)
+
+        informado = self.request.query_params.get('is_active')
+        if informado is None:
+            return queryset.filter(is_active=True)
+        if informado.lower() in ('todas', 'all'):
+            return queryset
+        return queryset.filter(is_active=informado.lower() not in ('false', '0'))
 
     def _transitar(self, ordem_servico, novo_status):
         """Traduz o comando HTTP em transição de domínio; o erro vira 400."""
@@ -84,6 +96,14 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         return self._transitar(self.get_object(), StatusOS.ENTREGUE)
 
     @action(detail=True, methods=['post'])
-    def cancelar(self, request, pk=None):
-        """Comando Cancelar OS -> Cancelada + liberação das reservas."""
-        return self._transitar(self.get_object(), StatusOS.CANCELADA)
+    def encerrar(self, request, pk=None):
+        """Comando Encerrar OS: baixa o registro e libera as reservas."""
+        ordem_servico = self.get_object()
+        try:
+            ordem_servico.encerrar()
+        except DjangoValidationError as exc:
+            return Response(
+                {'detail': exc.messages},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(ordem_servico).data)

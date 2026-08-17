@@ -135,11 +135,11 @@ class NotificarStatusOSTests(TestCase):
                 f'assunto errado em {novo_status}: {mail.outbox[0].subject!r}',
             )
 
-    def test_cancelamento_notifica(self):
+    def test_encerramento_notifica(self):
         mail.outbox.clear()
-        self.os.transitar_para(StatusOS.CANCELADA)
+        self.os.encerrar()
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn('cancelada', mail.outbox[0].subject.lower())
+        self.assertIn('encerrada', mail.outbox[0].subject.lower())
 
     def test_cliente_sem_email_nao_quebra_a_transicao(self):
         self.cliente.email = ''

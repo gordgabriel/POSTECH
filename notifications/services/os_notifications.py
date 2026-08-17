@@ -8,7 +8,6 @@ STATUS_TEMPLATE_MAP = {
     StatusOS.EM_EXECUCAO: 'os_em_execucao',
     StatusOS.FINALIZADA: 'os_finalizada',
     StatusOS.ENTREGUE: 'os_entregue',
-    StatusOS.CANCELADA: 'os_cancelada',
 }
 
 
@@ -45,4 +44,17 @@ def notificar_status_os(ordem_servico, status_anterior: str | None) -> int:
         to=email,
         template_key=template_key,
         context=context,
+    )
+
+
+def notificar_os_encerrada(ordem_servico) -> int:
+    """A OS saiu de circulação sem virar serviço; o status fica onde parou."""
+    email = ordem_servico.cliente.email
+    if not email:
+        return 0
+
+    return send_notification_email(
+        to=email,
+        template_key='os_encerrada',
+        context=_build_os_context(ordem_servico, ordem_servico.status),
     )
