@@ -36,6 +36,7 @@ class ItemServicoOS(ItemOSBase):
         if self.preco_unitario is None:
             self.preco_unitario = self.servico.preco
         super().save(*args, **kwargs)
+        self.sincronizar_orcamento()
 
     def __str__(self):
         return f'{self.quantidade}x {self.servico.nome}'

@@ -271,18 +271,38 @@ class ItensETestesDeOrcamento(OSTestCaseBase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_orcamento_adicional_cobre_apenas_itens_novos(self):
+    def test_item_novo_entra_no_orcamento_ainda_aberto(self):
+        """Antes do envio o orçamento continua sendo montado, não vira outro."""
         self.adicionar_itens()
-        Orcamento.gerar_para_os(self.os)
+        orcamento = Orcamento.em_aberto(self.os)
+        self.assertEqual(orcamento.sequencia, 1)
+        total_antes = orcamento.valor_total
 
-        # Reparo adicional: novo item incluído durante a execução.
         ItemServicoOS.objects.create(
             ordem_servico=self.os,
             servico=self.servico,
             quantidade=1,
             preco_unitario=None,
         )
-        adicional = Orcamento.gerar_para_os(self.os)
+        orcamento.refresh_from_db()
+        self.assertEqual(self.os.orcamentos.count(), 1)
+        self.assertEqual(orcamento.valor_total, total_antes + Decimal('150.00'))
+
+    def test_orcamento_adicional_cobre_apenas_itens_novos(self):
+        self.os.status = StatusOS.EM_DIAGNOSTICO
+        self.os.save()
+        self.adicionar_itens()
+        inicial = Orcamento.em_aberto(self.os)
+        inicial.enviar()
+
+        # Reparo adicional: só depois do envio é que o item abre outro orçamento.
+        ItemServicoOS.objects.create(
+            ordem_servico=self.os,
+            servico=self.servico,
+            quantidade=1,
+            preco_unitario=None,
+        )
+        adicional = Orcamento.em_aberto(self.os)
         self.assertEqual(adicional.sequencia, 2)
         self.assertEqual(adicional.valor_total, Decimal('150.00'))
 
@@ -664,6 +684,135 @@ class AlertaEstoqueMinimoTests(OSTestCaseBase):
         alertas = [m for m in mail.outbox if 'mínimo' in m.subject.lower()]
         self.assertEqual(alertas[0].to, ['operacao@test.com'])
         self.assertNotIn(self.cliente.email, alertas[0].to)
+
+
+class OrcamentoAutomaticoTests(OSTestCaseBase):
+    """Política: itens incluídos, então gerar o orçamento automaticamente."""
+
+    def setUp(self):
+        super().setUp()
+        self.os = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+
+    def incluir_servico(self, quantidade=1):
+        return self.client.post(
+            '/api/itens-servico/',
+            {
+                'ordem_servico': self.os.id,
+                'servico': self.servico.id,
+                'quantidade': quantidade,
+            },
+            format='json',
+        )
+
+    def test_incluir_item_gera_o_orcamento_sozinho(self):
+        self.assertEqual(self.os.orcamentos.count(), 0)
+        self.incluir_servico()
+        self.assertEqual(self.os.orcamentos.count(), 1)
+        orcamento = self.os.orcamentos.first()
+        self.assertEqual(orcamento.sequencia, 1)
+        self.assertEqual(orcamento.valor_total, self.servico.preco)
+        self.assertEqual(orcamento.status, Orcamento.Status.PENDENTE)
+
+    def test_gerar_nao_move_a_os(self):
+        self.incluir_servico()
+        self.os.refresh_from_db()
+        self.assertEqual(self.os.status, StatusOS.EM_DIAGNOSTICO)
+
+    def test_cada_item_novo_soma_no_mesmo_orcamento(self):
+        self.incluir_servico()
+        ItemPecaOS.objects.create(
+            ordem_servico=self.os,
+            peca=self.peca,
+            quantidade=2,
+            preco_unitario=self.peca.preco,
+        )
+        self.assertEqual(self.os.orcamentos.count(), 1)
+        orcamento = self.os.orcamentos.first()
+        self.assertEqual(
+            orcamento.valor_total,
+            self.servico.preco + 2 * self.peca.preco,
+        )
+
+    def test_mudar_quantidade_atualiza_o_total(self):
+        self.incluir_servico()
+        item = self.os.itens_servico.first()
+        item.quantidade = 3
+        item.save()
+        orcamento = self.os.orcamentos.first()
+        orcamento.refresh_from_db()
+        self.assertEqual(orcamento.valor_total, 3 * self.servico.preco)
+
+    def test_depois_do_envio_item_novo_abre_o_adicional(self):
+        self.incluir_servico()
+        orcamento = Orcamento.em_aberto(self.os)
+        self.client.post(f'/api/orcamentos/{orcamento.id}/enviar/')
+
+        self.incluir_servico()
+        self.assertEqual(self.os.orcamentos.count(), 2)
+        adicional = Orcamento.em_aberto(self.os)
+        self.assertEqual(adicional.sequencia, 2)
+        self.assertEqual(adicional.valor_total, self.servico.preco)
+
+    def test_post_em_orcamentos_continua_funcionando(self):
+        """O endpoint manual segue válido e devolve o orçamento em aberto."""
+        self.incluir_servico()
+        response = self.client.post(
+            '/api/orcamentos/',
+            {'ordem_servico': self.os.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(self.os.orcamentos.count(), 1)
+        self.assertEqual(response.data['sequencia'], 1)
+
+    def test_os_sem_itens_nao_tem_orcamento(self):
+        response = self.client.post(
+            '/api/orcamentos/',
+            {'ordem_servico': self.os.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class IdentificarClientePorDocumentoTests(OSTestCaseBase):
+    """Comando Identificar cliente por CPF/CNPJ."""
+
+    def setUp(self):
+        super().setUp()
+        self.outro = Cliente.objects.create(
+            cpf_cnpj='11.444.777/0001-61',
+            nome='Transportes Rápido LTDA',
+            email='contato@transportes.com',
+        )
+
+    def buscar(self, documento):
+        return self.client.get(f'/api/clientes/?cpf_cnpj={documento}')
+
+    def test_encontra_com_pontuacao(self):
+        response = self.buscar('529.982.247-25')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], self.cliente.id)
+
+    def test_encontra_so_com_digitos(self):
+        response = self.buscar('52998224725')
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], self.cliente.id)
+
+    def test_encontra_cnpj(self):
+        response = self.buscar('11444777000161')
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], self.outro.id)
+
+    def test_documento_inexistente_devolve_lista_vazia(self):
+        self.assertEqual(len(self.buscar('390.533.447-05').data), 0)
+
+    def test_sem_filtro_lista_todos(self):
+        response = self.client.get('/api/clientes/')
+        self.assertEqual(len(response.data), Cliente.objects.count())
+
+    def test_filtro_sem_digito_nao_vaza_a_base(self):
+        self.assertEqual(len(self.buscar('abc').data), 0)
 
 
 class PermissoesPorPapelTests(OSTestCaseBase):

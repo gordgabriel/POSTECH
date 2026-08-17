@@ -18,3 +18,22 @@ class ItemOSBase(models.Model):
     @property
     def subtotal(self):
         return self.quantidade * self.preco_unitario
+
+    def sincronizar_orcamento(self):
+        """
+        Política: itens incluídos, então gerar o orçamento automaticamente.
+
+        Item ainda sem orçamento entra no orçamento aberto da OS, criando um se
+        não houver. Item que já pertence a um orçamento ainda não enviado só
+        recalcula o total, para o valor acompanhar mudança de quantidade.
+        """
+        from so.models.orcamento import Orcamento
+
+        if self.orcamento_id is None:
+            Orcamento.gerar_para_os(self.ordem_servico)
+            return
+
+        if self.orcamento.status == Orcamento.Status.PENDENTE and (
+            self.orcamento.data_envio is None
+        ):
+            self.orcamento.recalcular_total()

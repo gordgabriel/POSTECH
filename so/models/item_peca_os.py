@@ -57,6 +57,7 @@ class ItemPecaOS(ItemOSBase):
                 elif diff < 0:
                     EstoqueService.liberar(self.peca, -diff)
             super().save(*args, **kwargs)
+            self.sincronizar_orcamento()
 
     def delete(self, *args, **kwargs):
         with transaction.atomic():

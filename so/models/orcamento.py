@@ -51,38 +51,63 @@ class Orcamento(models.Model):
         ]
 
     @classmethod
-    @transaction.atomic
-    def gerar_para_os(cls, ordem_servico):
-        """Vincula os itens ainda sem orçamento e congela o valor total."""
-        itens_servico = ordem_servico.itens_servico.filter(orcamento__isnull=True)
-        itens_peca = ordem_servico.itens_peca.filter(orcamento__isnull=True)
-        if not itens_servico.exists() and not itens_peca.exists():
-            raise ValidationError(
-                'A OS não possui itens pendentes de orçamento.',
-            )
+    def em_aberto(cls, ordem_servico):
+        """O orçamento que ainda está sendo montado: pendente e não enviado."""
+        return ordem_servico.orcamentos.filter(
+            status=cls.Status.PENDENTE,
+            data_envio__isnull=True,
+        ).first()
 
-        ultima = (
-            ordem_servico.orcamentos.aggregate(models.Max('sequencia'))['sequencia__max']
-            or 0
-        )
-        valor_total = sum(
-            (item.subtotal for item in itens_servico),
+    @transaction.atomic
+    def recalcular_total(self):
+        """Soma os itens vinculados. Só faz sentido antes do envio."""
+        total = sum(
+            (item.subtotal for item in self.itens_servico.all()),
             Decimal('0.00'),
         ) + sum(
-            (item.subtotal for item in itens_peca),
+            (item.subtotal for item in self.itens_peca.all()),
             Decimal('0.00'),
         )
+        if total != self.valor_total:
+            self.valor_total = total
+            self.save(update_fields=['valor_total'])
+        return self
 
-        orcamento = cls.objects.create(
-            ordem_servico=ordem_servico,
-            sequencia=ultima + 1,
-            valor_total=valor_total,
-        )
+    @classmethod
+    @transaction.atomic
+    def gerar_para_os(cls, ordem_servico):
+        """
+        Orçamento gerado automaticamente a partir dos serviços e peças da OS.
+
+        Chamado sozinho a cada item incluído. Enquanto o orçamento não é
+        enviado ele continua aberto e vai absorvendo os itens novos; depois do
+        envio, item novo abre o orçamento seguinte, que é o reparo adicional.
+        """
+        itens_servico = ordem_servico.itens_servico.filter(orcamento__isnull=True)
+        itens_peca = ordem_servico.itens_peca.filter(orcamento__isnull=True)
+
+        orcamento = cls.em_aberto(ordem_servico)
+        if not itens_servico.exists() and not itens_peca.exists():
+            if orcamento is None:
+                raise ValidationError(
+                    'A OS não possui itens pendentes de orçamento.',
+                )
+            return orcamento.recalcular_total()
+
+        if orcamento is None:
+            ultima = ordem_servico.orcamentos.aggregate(
+                models.Max('sequencia'),
+            )['sequencia__max'] or 0
+            orcamento = cls.objects.create(
+                ordem_servico=ordem_servico,
+                sequencia=ultima + 1,
+            )
+
         itens_servico.update(orcamento=orcamento)
         itens_peca.update(orcamento=orcamento)
 
         # Gerar não é evento pivotal: quem muda a fase da OS é o envio.
-        return orcamento
+        return orcamento.recalcular_total()
 
     # EmExecucao cobre o reparo adicional: a OS volta a aguardar resposta.
     STATUS_OS_QUE_PERMITEM_ENVIO = (StatusOS.EM_DIAGNOSTICO, StatusOS.EM_EXECUCAO)
