@@ -1,0 +1,21 @@
+So PosTech — Oficina Mecânica
+================================
+
+OS {{ os_ref }} pausada: estoque insuficiente
+
+O cliente {{ cliente_nome }} tentou aprovar o orçamento da OS {{ os_ref }}
+(veículo {{ veiculo_placa }}), mas não há peça suficiente para atender.
+
+A ordem permanece em {{ status_display }} e não entrou em execução.
+
+Faltou:
+
+{% for f in faltantes %}- {{ f.nome }}: precisa de {{ f.solicitado }}, disponível {{ f.disponivel }}
+{% endfor %}
+Reponha o estoque e peça ao cliente para aprovar novamente, ou ajuste os itens
+da ordem antes de reenviar o orçamento.
+
+OS: {{ os_uuid }}
+
+--
+Este é um e-mail automático. Não responda diretamente.

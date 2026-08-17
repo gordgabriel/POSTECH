@@ -1,4 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+
+from estoque.services import EstoqueInsuficiente
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -45,6 +47,22 @@ class OrcamentoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         orcamento = self.get_object()
         try:
             orcamento.responder(aprovado=aprovado)
+        except EstoqueInsuficiente as exc:
+            # A OS fica pausada onde está; o atendente já foi notificado.
+            return Response(
+                {
+                    'detail': exc.messages,
+                    'faltantes': [
+                        {
+                            'peca': f['peca'].nome,
+                            'solicitado': f['solicitado'],
+                            'disponivel': f['disponivel'],
+                        }
+                        for f in exc.faltantes
+                    ],
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         except DjangoValidationError as exc:
             return Response(
                 {'detail': exc.messages},

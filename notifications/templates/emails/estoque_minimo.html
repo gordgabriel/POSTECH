@@ -1,0 +1,32 @@
+{% extends "emails/base.html" %}
+{% block title %}Peças abaixo do estoque mínimo{% endblock %}
+{% block content %}
+<h3 style="color: #b7791f; margin-bottom: 8px;">Peças abaixo do estoque mínimo</h3>
+<p>As peças abaixo passaram do ponto de reposição e precisam ser repostas:</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+  <thead>
+    <tr style="background: #1a5276; color: #fff;">
+      <th style="text-align: left; padding: 8px; border: 1px solid #154360;">Peça</th>
+      <th style="text-align: center; padding: 8px; border: 1px solid #154360;">Disponível</th>
+      <th style="text-align: center; padding: 8px; border: 1px solid #154360;">Mínimo</th>
+      <th style="text-align: center; padding: 8px; border: 1px solid #154360;">Reservada</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in pecas %}
+    <tr>
+      <td style="padding: 8px; border: 1px solid #ccc;">{{ p.nome }}</td>
+      <td style="padding: 8px; border: 1px solid #ccc; text-align: center; color: #c0392b;"><strong>{{ p.disponivel }}</strong></td>
+      <td style="padding: 8px; border: 1px solid #ccc; text-align: center;">{{ p.minimo }}</td>
+      <td style="padding: 8px; border: 1px solid #ccc; text-align: center;">{{ p.reservada }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p style="font-size: 13px; color: #666;">
+  O saldo disponível desconta o que já está reservado para ordens de serviço
+  aprovadas, então ele reflete o que sobra para novos atendimentos.
+</p>
+{% endblock %}

@@ -1,7 +1,9 @@
 from decimal import Decimal
 from datetime import timedelta
 
+from django.core import mail
 from django.core.exceptions import ValidationError
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
 
@@ -417,71 +419,139 @@ class TransicoesAutomaticasTests(OSTestCaseBase):
         self.assertEqual(os_.status, StatusOS.AGUARDANDO_APROVACAO)
 
 
+@override_settings(EMAIL_OPERACAO='operacao@test.com')
 class EstoqueIntegracaoTests(OSTestCaseBase):
+    """A reserva acontece na aprovação do orçamento, não na inclusão do item."""
+
     def setUp(self):
         super().setUp()
-        self.os = self.criar_os()
+        self.os = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
 
-    def test_reserva_estoque_ao_incluir_peca(self):
+    def item(self, quantidade, os_=None):
+        return ItemPecaOS.objects.create(
+            ordem_servico=os_ or self.os,
+            peca=self.peca,
+            quantidade=quantidade,
+            preco_unitario=self.peca.preco,
+        )
+
+    def aprovar(self, os_=None):
+        orcamento = Orcamento.gerar_para_os(os_ or self.os)
+        orcamento.enviar()
+        orcamento.responder(aprovado=True)
+        return orcamento
+
+    def test_incluir_peca_nao_reserva_estoque(self):
         response = self.client.post(
             '/api/itens-peca/',
-            {
-                'ordem_servico': self.os.id,
-                'peca': self.peca.id,
-                'quantidade': 3,
-            },
+            {'ordem_servico': self.os.id, 'peca': self.peca.id, 'quantidade': 3},
             format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+        self.assertEqual(self.peca.quantidade_disponivel, 10)
+
+    def test_aprovar_orcamento_reserva_as_pecas(self):
+        self.item(3)
+        self.aprovar()
+        self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 3)
         self.assertEqual(self.peca.quantidade_disponivel, 7)
 
-    def test_estoque_insuficiente_e_rejeitado(self):
+    def test_incluir_mais_do_que_existe_e_aceito_ate_a_aprovacao(self):
         response = self.client.post(
             '/api/itens-peca/',
-            {
-                'ordem_servico': self.os.id,
-                'peca': self.peca.id,
-                'quantidade': 99,
-            },
+            {'ordem_servico': self.os.id, 'peca': self.peca.id, 'quantidade': 99},
             format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('quantidade', response.data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 0)
 
-    def test_baixa_estoque_na_entrega(self):
+    def test_aprovar_sem_estoque_pausa_a_os_e_notifica(self):
+        self.item(99)
+        orcamento = Orcamento.gerar_para_os(self.os)
+        orcamento.enviar()
+        mail.outbox.clear()
+
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/aprovar/')
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertIn('faltantes', response.data)
+        self.assertEqual(response.data['faltantes'][0]['solicitado'], 99)
+        self.assertEqual(response.data['faltantes'][0]['disponivel'], 10)
+
+        orcamento.refresh_from_db()
+        self.os.refresh_from_db()
+        self.peca.refresh_from_db()
+        # A OS fica pausada onde está e a resposta não é gravada: o cliente
+        # aprova de novo quando a peça chegar.
+        self.assertEqual(self.os.status, StatusOS.AGUARDANDO_APROVACAO)
+        self.assertEqual(orcamento.status, Orcamento.Status.PENDENTE)
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('estoque insuficiente', mail.outbox[0].subject.lower())
+
+    def test_reposicao_destrava_a_aprovacao(self):
+        self.item(99)
+        orcamento = Orcamento.gerar_para_os(self.os)
+        orcamento.enviar()
+        self.client.post(f'/api/orcamentos/{orcamento.id}/aprovar/')
+
+        self.peca.quantidade = 120
+        self.peca.save()
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/aprovar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.os.refresh_from_db()
+        self.assertEqual(self.os.status, StatusOS.EM_EXECUCAO)
+
+    def test_reserva_e_tudo_ou_nada(self):
+        outra = Peca.objects.create(
+            nome='Correia dentada',
+            preco=Decimal('90.00'),
+            quantidade=50,
+        )
+        self.item(2)
         ItemPecaOS.objects.create(
             ordem_servico=self.os,
-            peca=self.peca,
-            quantidade=2,
-            preco_unitario=self.peca.preco,
+            peca=outra,
+            quantidade=999,
+            preco_unitario=outra.preco,
         )
+        orcamento = Orcamento.gerar_para_os(self.os)
+        orcamento.enviar()
+
+        response = self.client.post(f'/api/orcamentos/{orcamento.id}/aprovar/')
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.peca.refresh_from_db()
+        outra.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+        self.assertEqual(outra.quantidade_reservada, 0)
+
+    def test_baixa_estoque_na_entrega(self):
+        self.item(2)
+        self.aprovar()
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 2)
 
-        for novo_status in [
-            StatusOS.EM_DIAGNOSTICO,
-            StatusOS.AGUARDANDO_APROVACAO,
-            StatusOS.EM_EXECUCAO,
-            StatusOS.FINALIZADA,
-            StatusOS.ENTREGUE,
-        ]:
-            self.os.transitar_para(novo_status)
+        self.os.refresh_from_db()
+        self.os.transitar_para(StatusOS.FINALIZADA)
+        self.os.transitar_para(StatusOS.ENTREGUE)
 
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade, 8)
         self.assertEqual(self.peca.quantidade_reservada, 0)
 
     def test_libera_reserva_ao_cancelar_os(self):
-        ItemPecaOS.objects.create(
-            ordem_servico=self.os,
-            peca=self.peca,
-            quantidade=2,
-            preco_unitario=self.peca.preco,
+        self.item(2)
+        self.aprovar()
+        # A OS foi para EmExecucao na aprovação; volta a etapa cancelável.
+        OrdemServico.objects.filter(pk=self.os.pk).update(
+            status=StatusOS.AGUARDANDO_APROVACAO,
         )
-        self.os.status = StatusOS.CANCELADA
-        self.os.save()
+        self.os.refresh_from_db()
+        self.os.transitar_para(StatusOS.CANCELADA)
 
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 0)
@@ -495,49 +565,105 @@ class EstoqueIntegracaoTests(OSTestCaseBase):
         )
         self.assertEqual(item.preco_unitario, self.peca.preco)
 
-    def test_aumentar_quantidade_reserva_mais_estoque(self):
-        item = ItemPecaOS.objects.create(
-            ordem_servico=self.os,
-            peca=self.peca,
-            quantidade=2,
-            preco_unitario=self.peca.preco,
-        )
+    def test_mudar_quantidade_antes_da_aprovacao_nao_mexe_no_estoque(self):
+        item = self.item(2)
+        item.quantidade = 5
+        item.save()
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+
+    def test_aumentar_quantidade_depois_de_aprovado_reserva_mais(self):
+        item = self.item(2)
+        self.aprovar()
+        item.refresh_from_db()
         item.quantidade = 5
         item.save()
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 5)
 
-    def test_diminuir_quantidade_libera_estoque(self):
-        item = ItemPecaOS.objects.create(
-            ordem_servico=self.os,
-            peca=self.peca,
-            quantidade=5,
-            preco_unitario=self.peca.preco,
-        )
+    def test_diminuir_quantidade_depois_de_aprovado_libera(self):
+        item = self.item(5)
+        self.aprovar()
+        item.refresh_from_db()
         item.quantidade = 2
         item.save()
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 2)
 
-    def test_excluir_item_libera_reserva(self):
-        item = ItemPecaOS.objects.create(
-            ordem_servico=self.os,
-            peca=self.peca,
-            quantidade=3,
-            preco_unitario=self.peca.preco,
-        )
+    def test_excluir_item_aprovado_libera_reserva(self):
+        item = self.item(3)
+        self.aprovar()
+        item.refresh_from_db()
         item.delete()
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 0)
 
+    def test_excluir_item_nao_aprovado_nao_mexe_no_estoque(self):
+        item = self.item(3)
+        item.delete()
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+        self.assertEqual(self.peca.quantidade, 10)
+
     def test_str_do_item(self):
-        item = ItemPecaOS.objects.create(
+        item = self.item(2)
+        self.assertEqual(str(item), f'2x {self.peca.nome}')
+
+
+@override_settings(EMAIL_OPERACAO='operacao@test.com')
+class AlertaEstoqueMinimoTests(OSTestCaseBase):
+    """Política: estoque abaixo do mínimo, então alertar reposição."""
+
+    def setUp(self):
+        super().setUp()
+        self.peca.estoque_minimo = 8
+        self.peca.save()
+        self.os = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+
+    def aprovar_com(self, quantidade):
+        ItemPecaOS.objects.create(
             ordem_servico=self.os,
             peca=self.peca,
-            quantidade=2,
+            quantidade=quantidade,
             preco_unitario=self.peca.preco,
         )
-        self.assertEqual(str(item), f'2x {self.peca.nome}')
+        orcamento = Orcamento.gerar_para_os(self.os)
+        orcamento.enviar()
+        mail.outbox.clear()
+        # O alerta sai em on_commit, que não roda sozinho dentro do TestCase.
+        with self.captureOnCommitCallbacks(execute=True):
+            orcamento.responder(aprovado=True)
+        self.os.refresh_from_db()
+
+    def test_reserva_que_fura_o_minimo_alerta(self):
+        # 10 em estoque, mínimo 8: reservar 3 deixa 7 disponíveis.
+        self.aprovar_com(3)
+        alertas = [m for m in mail.outbox if 'mínimo' in m.subject.lower()]
+        self.assertEqual(len(alertas), 1)
+        self.assertIn(self.peca.nome, alertas[0].body)
+
+    def test_reserva_que_nao_fura_o_minimo_nao_alerta(self):
+        self.aprovar_com(2)
+        alertas = [m for m in mail.outbox if 'mínimo' in m.subject.lower()]
+        self.assertEqual(len(alertas), 0)
+
+    def test_baixa_na_entrega_alerta(self):
+        self.aprovar_com(3)
+        self.os.transitar_para(StatusOS.FINALIZADA)
+        mail.outbox.clear()
+        with self.captureOnCommitCallbacks(execute=True):
+            self.os.transitar_para(StatusOS.ENTREGUE)
+
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade, 7)
+        alertas = [m for m in mail.outbox if 'mínimo' in m.subject.lower()]
+        self.assertEqual(len(alertas), 1)
+
+    def test_alerta_vai_para_a_oficina_e_nao_para_o_cliente(self):
+        self.aprovar_com(3)
+        alertas = [m for m in mail.outbox if 'mínimo' in m.subject.lower()]
+        self.assertEqual(alertas[0].to, ['operacao@test.com'])
+        self.assertNotIn(self.cliente.email, alertas[0].to)
 
 
 class PermissoesPorPapelTests(OSTestCaseBase):
@@ -909,7 +1035,8 @@ class RespostaOrcamentoTests(OSTestCaseBase):
         os_.refresh_from_db()
         self.peca.refresh_from_db()
         self.assertEqual(os_.status, StatusOS.EM_EXECUCAO)
-        # Libera só as 4 do adicional; as 3 já aprovadas seguem reservadas.
+        # O adicional nunca reservou, porque não chegou a ser aprovado.
+        # As 3 peças do orçamento inicial seguem reservadas.
         self.assertEqual(self.peca.quantidade_reservada, 3)
 
     def test_adicional_devolve_os_para_aguardando_aprovacao(self):
@@ -946,6 +1073,15 @@ class ComandosOrdemServicoTests(OSTestCaseBase):
             preco_unitario=self.peca.preco,
         )
 
+    def incluir_peca_aprovada(self, ordem_servico, quantidade=2):
+        """Inclui e aprova, que é o que de fato reserva a peça no estoque."""
+        item = self.incluir_peca(ordem_servico, quantidade)
+        orcamento = Orcamento.gerar_para_os(ordem_servico)
+        orcamento.enviar()
+        orcamento.responder(aprovado=True)
+        ordem_servico.refresh_from_db()
+        return item
+
     def test_finalizar_os_em_execucao(self):
         os_ = self.criar_os(status=StatusOS.EM_EXECUCAO)
         response = self.client.post(f'/api/ordens-servico/{os_.id}/finalizar/')
@@ -962,8 +1098,8 @@ class ComandosOrdemServicoTests(OSTestCaseBase):
         self.assertEqual(os_.status, StatusOS.RECEBIDA)
 
     def test_entregar_os_finalizada_baixa_estoque(self):
-        os_ = self.criar_os(status=StatusOS.EM_EXECUCAO)
-        self.incluir_peca(os_)
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.incluir_peca_aprovada(os_)
         os_.transitar_para(StatusOS.FINALIZADA)
 
         response = self.client.post(f'/api/ordens-servico/{os_.id}/entregar/')
@@ -984,11 +1120,18 @@ class ComandosOrdemServicoTests(OSTestCaseBase):
         self.assertEqual(os_.status, StatusOS.RECEBIDA)
 
     def test_cancelar_os_libera_reserva(self):
-        os_ = self.criar_os()
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
         self.incluir_peca(os_)
+        orcamento = Orcamento.gerar_para_os(os_)
+        orcamento.enviar()
+        orcamento.responder(aprovado=True)
         self.peca.refresh_from_db()
         self.assertEqual(self.peca.quantidade_reservada, 2)
 
+        # Volta à etapa cancelável: a aprovação levou a OS para EmExecucao.
+        OrdemServico.objects.filter(pk=os_.pk).update(
+            status=StatusOS.AGUARDANDO_APROVACAO,
+        )
         response = self.client.post(f'/api/ordens-servico/{os_.id}/cancelar/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], StatusOS.CANCELADA)

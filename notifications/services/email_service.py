@@ -13,6 +13,8 @@ DEFAULT_SUBJECTS = {
     'os_finalizada': 'Serviço concluído — veículo pronto para retirada',
     'os_entregue': 'Veículo entregue — ordem de serviço encerrada',
     'os_cancelada': 'Ordem de serviço cancelada',
+    'estoque_minimo': 'Peças abaixo do estoque mínimo',
+    'estoque_insuficiente': 'OS pausada: estoque insuficiente',
 }
 
 

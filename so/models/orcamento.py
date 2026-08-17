@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
-from estoque.services import EstoqueService
+from estoque.services import EstoqueInsuficiente, EstoqueService
 from so.models.ordem_servico import OrdemServico, StatusOS
 
 
@@ -126,6 +126,19 @@ class Orcamento(models.Model):
                 f'antes de registrar a resposta.',
             )
 
+        if aprovado:
+            # Política do quadro: reservar as peças da OS aprovada. Se faltar,
+            # o atendente é avisado e a OS fica pausada onde está — a resposta
+            # não é gravada, para que o cliente possa aprovar de novo depois.
+            try:
+                EstoqueService.reservar_itens_orcamento(self)
+            except EstoqueInsuficiente as exc:
+                from notifications.services.estoque_notifications import (
+                    alertar_estoque_insuficiente,
+                )
+                alertar_estoque_insuficiente(os_, exc.faltantes)
+                raise
+
         self.status = self.Status.APROVADO if aprovado else self.Status.RECUSADO
         self.data_resposta = timezone.now()
         self.save(update_fields=['status', 'data_resposta'])
@@ -137,8 +150,8 @@ class Orcamento(models.Model):
             # O save() da OS libera as reservas ao entrar em Cancelada.
             os_.transitar_para(StatusOS.CANCELADA)
         else:
-            # Recusa de adicional: a OS retoma o que o cliente já aprovou.
-            EstoqueService.liberar_itens_orcamento(self)
+            # Recusa de adicional: nada a liberar, porque orçamento não
+            # aprovado nunca reservou. A OS retoma o que já foi aprovado.
             os_.transitar_para(StatusOS.EM_EXECUCAO)
 
     def __str__(self):

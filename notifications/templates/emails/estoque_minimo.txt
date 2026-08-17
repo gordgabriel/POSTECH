@@ -1,0 +1,14 @@
+So PosTech — Oficina Mecânica
+================================
+
+Peças abaixo do estoque mínimo
+
+As peças abaixo passaram do ponto de reposição e precisam ser repostas:
+
+{% for p in pecas %}- {{ p.nome }}: {{ p.disponivel }} disponível(is), mínimo {{ p.minimo }}{% if p.reservada %} ({{ p.reservada }} reservada(s) para ordens aprovadas){% endif %}
+{% endfor %}
+O saldo disponível desconta o que já está reservado para ordens de serviço
+aprovadas, então ele reflete o que sobra para novos atendimentos.
+
+--
+Este é um e-mail automático. Não responda diretamente.

@@ -32,14 +32,24 @@ class ItemPecaOS(ItemOSBase):
         verbose_name = 'item de peça da OS'
         verbose_name_plural = 'itens de peça da OS'
 
+    @property
+    def esta_reservado(self):
+        """A peça só segura estoque depois que o cliente aprova o orçamento."""
+        from so.models.orcamento import Orcamento
+
+        return (
+            self.orcamento_id is not None
+            and self.orcamento.status == Orcamento.Status.APROVADO
+        )
+
     def save(self, *args, **kwargs):
         if self.preco_unitario is None:
             self.preco_unitario = self.peca.preco
 
+        # Incluir item é montar a proposta, e proposta não segura peça: a
+        # reserva acontece na aprovação do orçamento.
         with transaction.atomic():
-            if self.pk is None:
-                EstoqueService.reservar(self.peca, self.quantidade)
-            else:
+            if self.pk is not None and self.esta_reservado:
                 anterior = ItemPecaOS.objects.get(pk=self.pk)
                 diff = self.quantidade - anterior.quantidade
                 if diff > 0:
@@ -50,7 +60,8 @@ class ItemPecaOS(ItemOSBase):
 
     def delete(self, *args, **kwargs):
         with transaction.atomic():
-            EstoqueService.liberar(self.peca, self.quantidade)
+            if self.esta_reservado:
+                EstoqueService.liberar(self.peca, self.quantidade)
             super().delete(*args, **kwargs)
 
     def __str__(self):

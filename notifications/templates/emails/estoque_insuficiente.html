@@ -1,0 +1,41 @@
+{% extends "emails/base.html" %}
+{% block title %}OS {{ os_ref }} pausada: estoque insuficiente{% endblock %}
+{% block content %}
+<h3 style="color: #c0392b; margin-bottom: 8px;">OS {{ os_ref }} pausada: estoque insuficiente</h3>
+
+<p>
+  O cliente <strong>{{ cliente_nome }}</strong> tentou aprovar o orçamento da
+  OS <strong>{{ os_ref }}</strong> (veículo {{ veiculo_placa }}), mas não há
+  peça suficiente para atender.
+</p>
+
+<p style="background: #fdf2f2; border-left: 4px solid #c0392b; padding: 12px;">
+  A ordem permanece em <strong>{{ status_display }}</strong> e não entrou em execução.
+</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+  <thead>
+    <tr style="background: #1a5276; color: #fff;">
+      <th style="text-align: left; padding: 8px; border: 1px solid #154360;">Peça</th>
+      <th style="text-align: center; padding: 8px; border: 1px solid #154360;">Precisa</th>
+      <th style="text-align: center; padding: 8px; border: 1px solid #154360;">Disponível</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for f in faltantes %}
+    <tr>
+      <td style="padding: 8px; border: 1px solid #ccc;">{{ f.nome }}</td>
+      <td style="padding: 8px; border: 1px solid #ccc; text-align: center;">{{ f.solicitado }}</td>
+      <td style="padding: 8px; border: 1px solid #ccc; text-align: center; color: #c0392b;"><strong>{{ f.disponivel }}</strong></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p>
+  Reponha o estoque e peça ao cliente para aprovar novamente, ou ajuste os itens
+  da ordem antes de reenviar o orçamento.
+</p>
+
+<p style="font-size: 12px; color: #888;">OS: {{ os_uuid }}</p>
+{% endblock %}
