@@ -1,6 +1,12 @@
 from rest_framework import viewsets
 
-from accounts.permissions import IsMecanico, IsOperador, PermissoesPorAcaoMixin
+from accounts.permissions import (
+    IsAtendente,
+    IsMecanico,
+    IsOperador,
+    PermissoesPorAcaoMixin,
+    has_any_role,
+)
 from so.models import ItemServicoOS
 from so.serializers import ItemServicoOSSerializer
 
@@ -13,11 +19,13 @@ class ItemServicoOSViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
     serializer_class = ItemServicoOSSerializer
     permission_classes = [IsOperador]
 
-    # Quem monta a lista de reparos é o mecânico. O cliente vê os itens
-    # aninhados na própria OS, não por esta rota.
+    # Serviço é item de catálogo e não mexe em estoque, então o atendente
+    # também inclui: é ele quem atende o cliente que pede um serviço a mais.
+    # Peça continua só com o mecânico, em ItemPecaOSViewSet.
+    _INCLUIR = [has_any_role(IsMecanico, IsAtendente)]
     permissoes_por_acao = {
-        'create': [IsMecanico],
-        'update': [IsMecanico],
-        'partial_update': [IsMecanico],
-        'destroy': [IsMecanico],
+        'create': _INCLUIR,
+        'update': _INCLUIR,
+        'partial_update': _INCLUIR,
+        'destroy': _INCLUIR,
     }

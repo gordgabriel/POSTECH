@@ -624,15 +624,29 @@ class PermissoesPorPapelTests(OSTestCaseBase):
             )
 
     # ------------------------------------------------------------ itens e orçamento
-    def test_incluir_item_e_do_mecanico(self):
+    def test_incluir_servico_vale_para_mecanico_e_atendente(self):
         dados = {
             'ordem_servico': self.os.id,
             'servico': self.servico.id,
             'quantidade': 1,
         }
         self.assertPermite(self.mecanico, 'post', '/api/itens-servico/', dados)
-        for usuario in (self.atendente, self.estoquista, self.usuario_cliente):
+        # O atendente inclui serviço porque é ele quem recebe o pedido do
+        # cliente; serviço é item de catálogo e não reserva estoque.
+        self.assertPermite(self.atendente, 'post', '/api/itens-servico/', dados)
+        for usuario in (self.estoquista, self.usuario_cliente):
             self.assertBloqueia(usuario, 'post', '/api/itens-servico/', dados)
+
+    def test_incluir_peca_e_so_do_mecanico(self):
+        dados = {
+            'ordem_servico': self.os.id,
+            'peca': self.peca.id,
+            'quantidade': 1,
+        }
+        self.assertPermite(self.mecanico, 'post', '/api/itens-peca/', dados)
+        # Peça reserva estoque e exige juízo técnico: fica com o mecânico.
+        for usuario in (self.atendente, self.estoquista, self.usuario_cliente):
+            self.assertBloqueia(usuario, 'post', '/api/itens-peca/', dados)
 
     def test_gerar_e_do_mecanico_enviar_e_do_atendente(self):
         self.os.status = StatusOS.EM_DIAGNOSTICO
