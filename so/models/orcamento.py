@@ -170,15 +170,35 @@ class Orcamento(models.Model):
 
         if aprovado:
             os_.transitar_para(StatusOS.EM_EXECUCAO)
-        elif self.sequencia == 1:
+            return
+
+        # O que o cliente recusou não vai ser feito: os itens saem da OS em
+        # vez de ficarem pendurados num orçamento morto, sem serem orçados de
+        # novo, reservados nem baixados. O orçamento recusado permanece como
+        # histórico do que foi proposto e por quanto.
+        self.descartar_itens()
+
+        if self.sequencia == 1:
             # Recusa do inicial: a OS volta para diagnóstico, onde o mecânico
-            # revê os itens e monta outra proposta. Se o cliente desistir de
-            # vez, o atendente encerra a OS.
+            # remonta a proposta. Se o cliente desistir de vez, o atendente
+            # encerra a OS.
             os_.transitar_para(StatusOS.EM_DIAGNOSTICO)
         else:
             # Recusa de adicional: nada a liberar, porque orçamento não
             # aprovado nunca reservou. A OS retoma o que já foi aprovado.
             os_.transitar_para(StatusOS.EM_EXECUCAO)
+
+    @transaction.atomic
+    def descartar_itens(self):
+        """
+        Tira da OS os itens deste orçamento.
+
+        Só faz sentido depois da recusa: como o orçamento já está recusado,
+        `ItemPecaOS.esta_reservado` é falso e nenhuma reserva é mexida — o
+        que é correto, porque orçamento não aprovado nunca reservou.
+        """
+        for item in list(self.itens_peca.all()) + list(self.itens_servico.all()):
+            item.delete()
 
     def __str__(self):
         return f'Orçamento {self.sequencia} da OS {self.ordem_servico.uuid}'

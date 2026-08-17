@@ -1209,6 +1209,70 @@ class RespostaOrcamentoTests(OSTestCaseBase):
         os_.refresh_from_db()
         self.assertEqual(os_.status, StatusOS.AGUARDANDO_APROVACAO)
 
+    def test_recusa_de_adicional_tira_os_itens_da_os(self):
+        """O que o cliente recusou não fica pendurado na OS."""
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.item_peca(os_, 3)
+        self.aprovar(self.orcamento_enviado(os_))
+        os_.refresh_from_db()
+        self.assertEqual(os_.itens_peca.count(), 1)
+
+        # Reparo adicional com dois itens.
+        self.item_peca(os_, 4)
+        ItemServicoOS.objects.create(
+            ordem_servico=os_,
+            servico=self.servico,
+            quantidade=1,
+            preco_unitario=self.servico.preco,
+        )
+        adicional = self.orcamento_enviado(os_)
+        self.assertEqual(os_.itens_peca.count(), 2)
+        self.assertEqual(os_.itens_servico.count(), 1)
+
+        self.client.post(f'/api/orcamentos/{adicional.id}/recusar/')
+
+        os_.refresh_from_db()
+        self.peca.refresh_from_db()
+        # Sobrou só o item do orçamento aprovado.
+        self.assertEqual(os_.itens_peca.count(), 1)
+        self.assertEqual(os_.itens_servico.count(), 0)
+        self.assertEqual(os_.itens_peca.first().quantidade, 3)
+        # A reserva do que foi aprovado não foi tocada.
+        self.assertEqual(self.peca.quantidade_reservada, 3)
+        # O orçamento recusado fica como histórico do que foi proposto.
+        adicional.refresh_from_db()
+        self.assertEqual(adicional.status, Orcamento.Status.RECUSADO)
+        self.assertGreater(adicional.valor_total, 0)
+
+    def test_recusa_do_inicial_tira_os_itens_e_volta_para_diagnostico(self):
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.item_peca(os_, 3)
+        orcamento = self.orcamento_enviado(os_)
+
+        self.client.post(f'/api/orcamentos/{orcamento.id}/recusar/')
+
+        os_.refresh_from_db()
+        self.peca.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.EM_DIAGNOSTICO)
+        self.assertEqual(os_.itens_peca.count(), 0)
+        self.assertEqual(self.peca.quantidade_reservada, 0)
+        self.assertEqual(self.peca.quantidade, 10)
+
+    def test_item_reproposto_depois_da_recusa_entra_em_orcamento_novo(self):
+        """Depois da recusa o mecânico remonta a proposta do zero."""
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.item_peca(os_, 5)
+        orcamento = self.orcamento_enviado(os_)
+        self.client.post(f'/api/orcamentos/{orcamento.id}/recusar/')
+
+        # Reoferta mais barata.
+        self.item_peca(os_, 1)
+        novo = Orcamento.em_aberto(os_)
+        self.assertEqual(novo.sequencia, 2)
+        self.assertEqual(novo.itens_peca.count(), 1)
+        self.assertEqual(novo.itens_peca.first().quantidade, 1)
+        self.assertLess(novo.valor_total, orcamento.valor_total)
+
     def test_enviar_orcamento_ja_respondido_retorna_400(self):
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
         self.item_peca(os_, 1)
