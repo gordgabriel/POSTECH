@@ -1,3 +1,5 @@
+import uuid
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status as http_status
 from rest_framework import viewsets
@@ -41,7 +43,7 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         if not self.request.user.is_operador:
             # Cliente com login só enxerga as próprias OS.
             queryset = queryset.filter(cliente__usuario=self.request.user)
-        return self._filtrar_por_atividade(queryset)
+        return self._filtrar_por_historico(self._filtrar_por_atividade(queryset))
 
     def _filtrar_por_atividade(self, queryset):
         """OS encerrada sai de circulação; ?is_active=false traz o histórico."""
@@ -54,6 +56,30 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         if informado.lower() in ('todas', 'all'):
             return queryset
         return queryset.filter(is_active=informado.lower() not in ('false', '0'))
+
+    def _filtrar_por_historico(self, queryset):
+        """Modelo de leitura Histórico do cliente e do veículo.
+
+        ?cliente= e ?veiculo= aceitam id ou uuid, porque o serializer expõe os
+        dois. Valor que não é nenhum dos dois devolve lista vazia, não erro: é
+        consulta, e consulta que não acha nada não achou nada.
+        """
+        if self.action != 'list':
+            return queryset
+
+        for parametro, campo in (('cliente', 'cliente'), ('veiculo', 'veiculo')):
+            informado = self.request.query_params.get(parametro)
+            if not informado:
+                continue
+            if informado.isdigit():
+                queryset = queryset.filter(**{f'{campo}_id': int(informado)})
+            else:
+                try:
+                    uuid.UUID(informado)
+                except ValueError:
+                    return queryset.none()
+                queryset = queryset.filter(**{f'{campo}__uuid': informado})
+        return queryset
 
     def _transitar(self, ordem_servico, novo_status):
         """Traduz o comando HTTP em transição de domínio; o erro vira 400."""

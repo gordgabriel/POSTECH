@@ -1411,3 +1411,67 @@ class ComandosOrdemServicoTests(OSTestCaseBase):
         response = self.client.post(f'/api/ordens-servico/{os_.id}/encerrar/')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('detail', response.data)
+
+
+class HistoricoClienteVeiculoTests(OSTestCaseBase):
+    """Modelo de leitura Histórico do cliente e do veículo, da seção 8 da Ubíqua."""
+
+    def setUp(self):
+        super().setUp()
+        self.outro_cliente = Cliente.objects.create(
+            cpf_cnpj='11144477735',
+            nome='Maria Souza',
+            email='maria@test.com',
+        )
+        self.outro_veiculo = Veiculo.objects.create(
+            placa='XYZ9K88',
+            marca='VW',
+            modelo='Gol',
+            ano=2020,
+            cliente=self.outro_cliente,
+        )
+        self.os_joao = self.criar_os()
+        self.os_maria = self.criar_os(
+            cliente=self.outro_cliente,
+            veiculo=self.outro_veiculo,
+        )
+
+    def ids(self, url):
+        return [o['id'] for o in self.client.get(url).data]
+
+    def test_filtra_por_cliente(self):
+        ids = self.ids(f'/api/ordens-servico/?cliente={self.cliente.id}')
+        self.assertEqual(ids, [self.os_joao.id])
+
+    def test_filtra_por_veiculo(self):
+        ids = self.ids(f'/api/ordens-servico/?veiculo={self.outro_veiculo.id}')
+        self.assertEqual(ids, [self.os_maria.id])
+
+    def test_filtra_por_uuid(self):
+        """O serializer expõe id e uuid; os dois servem para consultar."""
+        ids = self.ids(f'/api/ordens-servico/?cliente={self.cliente.uuid}')
+        self.assertEqual(ids, [self.os_joao.id])
+
+    def test_cliente_e_veiculo_juntos(self):
+        ids = self.ids(
+            f'/api/ordens-servico/?cliente={self.cliente.id}'
+            f'&veiculo={self.outro_veiculo.id}'
+        )
+        self.assertEqual(ids, [])
+
+    def test_valor_invalido_devolve_lista_vazia(self):
+        """Consulta que não acha nada não é erro."""
+        response = self.client.get('/api/ordens-servico/?cliente=nao-existe')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(list(response.data), [])
+
+    def test_sem_filtro_traz_todas(self):
+        ids = self.ids('/api/ordens-servico/')
+        self.assertCountEqual(ids, [self.os_joao.id, self.os_maria.id])
+
+    def test_historico_respeita_o_encerramento(self):
+        """O filtro soma ao is_active, não o substitui."""
+        self.client.post(f'/api/ordens-servico/{self.os_joao.id}/encerrar/')
+        url = f'/api/ordens-servico/?cliente={self.cliente.id}'
+        self.assertEqual(self.ids(url), [])
+        self.assertEqual(self.ids(url + '&is_active=false'), [self.os_joao.id])
