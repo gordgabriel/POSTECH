@@ -178,15 +178,22 @@ class Orcamento(models.Model):
         # histórico do que foi proposto e por quanto.
         self.descartar_itens()
 
-        if self.sequencia == 1:
-            # Recusa do inicial: a OS volta para diagnóstico, onde o mecânico
-            # remonta a proposta. Se o cliente desistir de vez, o atendente
-            # encerra a OS.
-            os_.transitar_para(StatusOS.EM_DIAGNOSTICO)
-        else:
+        # O destino não vem do número do orçamento: vem de a OS já ter tido
+        # reparo autorizado. Uma reproposta feita depois de uma recusa ainda é
+        # negociação inicial, mesmo nascendo com sequência 2.
+        ja_autorizou = self.ordem_servico.orcamentos.filter(
+            status=self.Status.APROVADO,
+        ).exists()
+
+        if ja_autorizou:
             # Recusa de adicional: nada a liberar, porque orçamento não
             # aprovado nunca reservou. A OS retoma o que já foi aprovado.
             os_.transitar_para(StatusOS.EM_EXECUCAO)
+        else:
+            # Recusa na negociação inicial: a OS volta para diagnóstico, onde o
+            # mecânico remonta a proposta. Se o cliente desistir de vez, o
+            # atendente encerra a OS.
+            os_.transitar_para(StatusOS.EM_DIAGNOSTICO)
 
     @transaction.atomic
     def descartar_itens(self):

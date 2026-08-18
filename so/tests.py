@@ -1156,6 +1156,49 @@ class RespostaOrcamentoTests(OSTestCaseBase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         return response
 
+    def test_recusa_da_reproposta_tambem_devolve_para_diagnostico(self):
+        """Reproposta depois de recusa ainda é negociação inicial.
+
+        Ela nasce com sequência 2, mas a OS nunca teve reparo autorizado: o
+        destino é o diagnóstico de novo, não a execução.
+        """
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.item_peca(os_, 3)
+        primeiro = self.orcamento_enviado(os_)
+        self.client.post(f'/api/orcamentos/{primeiro.id}/recusar/')
+
+        self.item_peca(os_, 2)
+        segundo = self.orcamento_enviado(os_)
+        self.assertEqual(segundo.sequencia, 2)
+
+        response = self.client.post(f'/api/orcamentos/{segundo.id}/recusar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.EM_DIAGNOSTICO)
+        self.assertIsNone(os_.data_inicio_execucao)
+        self.assertFalse(
+            os_.orcamentos.filter(status=Orcamento.Status.APROVADO).exists(),
+        )
+
+    def test_recusa_de_adicional_depende_de_ter_aprovado_antes(self):
+        """Com um orçamento já aprovado, a recusa do adicional volta à execução."""
+        os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
+        self.item_peca(os_, 2)
+        inicial = self.orcamento_enviado(os_)
+        self.aprovar(inicial)
+
+        self.item_peca(os_, 1)
+        adicional = self.orcamento_enviado(os_)
+        response = self.client.post(f'/api/orcamentos/{adicional.id}/recusar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        os_.refresh_from_db()
+        self.assertEqual(os_.status, StatusOS.EM_EXECUCAO)
+        # A reserva do que foi aprovado não é tocada pela recusa do extra.
+        self.peca.refresh_from_db()
+        self.assertEqual(self.peca.quantidade_reservada, 2)
+
     def test_recusa_do_orcamento_inicial_devolve_para_diagnostico(self):
         """O cliente achou caro: o mecânico revê os itens e propõe de novo."""
         os_ = self.criar_os(status=StatusOS.EM_DIAGNOSTICO)
