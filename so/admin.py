@@ -22,7 +22,6 @@ class OrdemServicoAdmin(admin.ModelAdmin):
         'status',
         'cliente',
         'veiculo',
-        'responsavel',
         'data_abertura',
     ]
     list_filter = ['status', 'is_active']

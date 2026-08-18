@@ -9,11 +9,6 @@ from so.serializers.orcamento_serializer import OrcamentoSerializer
 class OrdemServicoSerializer(serializers.ModelSerializer):
     cliente_nome = serializers.CharField(source='cliente.nome', read_only=True)
     veiculo_placa = serializers.CharField(source='veiculo.placa', read_only=True)
-    responsavel_username = serializers.CharField(
-        source='responsavel.username',
-        read_only=True,
-        default=None,
-    )
     itens_servico = ItemServicoOSSerializer(many=True, read_only=True)
     itens_peca = ItemPecaOSSerializer(many=True, read_only=True)
     orcamentos = OrcamentoSerializer(many=True, read_only=True)
@@ -31,8 +26,6 @@ class OrdemServicoSerializer(serializers.ModelSerializer):
             'cliente_nome',
             'veiculo',
             'veiculo_placa',
-            'responsavel',
-            'responsavel_username',
             'data_abertura',
             'data_diagnostico',
             'data_inicio_execucao',

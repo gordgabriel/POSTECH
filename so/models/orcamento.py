@@ -10,13 +10,14 @@ from so.models.ordem_servico import OrdemServico, StatusOS
 
 
 class Orcamento(models.Model):
-    """N:1 com a OS: sequência 1 é o inicial, 2 em diante são os adicionais."""
+    """N:1 com a OS. Enquanto nenhum é aprovado, cada novo orçamento é outra
+    proposta da negociação inicial; depois da primeira aprovação, os seguintes
+    são reparos adicionais. A sequência só numera, não classifica."""
 
     class Status(models.TextChoices):
         PENDENTE = 'pendente', 'Pendente'
         APROVADO = 'aprovado', 'Aprovado'
         RECUSADO = 'recusado', 'Recusado'
-        EXPIRADO = 'expirado', 'Expirado'
 
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     ordem_servico = models.ForeignKey(

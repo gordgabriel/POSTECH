@@ -1,6 +1,5 @@
 import uuid
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -68,14 +67,6 @@ class OrdemServico(models.Model):
         Veiculo,
         on_delete=models.PROTECT,
         related_name='ordens_servico',
-    )
-    # PROTECT: apagar o mecânico não pode apagar as OS dele.
-    responsavel = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name='ordens_responsavel',
     )
     data_abertura = models.DateTimeField(auto_now_add=True)
     data_diagnostico = models.DateTimeField(null=True, blank=True)

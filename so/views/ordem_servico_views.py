@@ -36,7 +36,7 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = (
-            OrdemServico.objects.select_related('cliente', 'veiculo', 'responsavel')
+            OrdemServico.objects.select_related('cliente', 'veiculo')
             .prefetch_related('itens_servico', 'itens_peca', 'orcamentos')
             .order_by('-data_abertura')
         )
