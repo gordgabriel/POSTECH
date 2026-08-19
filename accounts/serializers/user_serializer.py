@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 
 from accounts.models import UserModel
 
@@ -47,6 +48,25 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'phone_number',
         ]
         read_only_fields = ['id', 'uuid']
+
+    def validate_type(self, valor):
+        """O papel define a alçada do usuário, então só o admin o atribui.
+
+        O cadastro fica aberto para que o cliente crie o próprio login e
+        acompanhe suas ordens de serviço — mas quem se cadastra sozinho nasce
+        sem papel, isto é, cliente. Operador é criado por admin autenticado ou
+        pelo comando seed_users.
+        """
+        if not valor:
+            return valor
+
+        usuario = self.context['request'].user
+        if not (usuario.is_authenticated and usuario.is_admin):
+            raise PermissionDenied(
+                'Definir o papel do usuário é operação de admin. '
+                'Cadastro sem autenticação cria apenas login de cliente.',
+            )
+        return valor
 
     def create(self, validated_data):
         password = validated_data.pop('password')

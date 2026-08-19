@@ -82,6 +82,58 @@ class UserRegistrationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(UserModel.objects.filter(username='novo').exists())
 
+    def test_cadastro_sem_autenticacao_nao_define_papel(self):
+        """Sem esta barreira, qualquer anônimo se cadastraria como admin."""
+        response = self.client.post(
+            '/api/users/',
+            {
+                'username': 'invasor',
+                'email': 'invasor@test.com',
+                'password': 'senha12345',
+                'type': UserModel.Tipo.ADMIN,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(UserModel.objects.filter(username='invasor').exists())
+
+    def test_operador_nao_promove_a_si_mesmo(self):
+        atendente = UserModel.objects.create_user(
+            username='at', email='at@test.com', password='senha12345',
+            type=UserModel.Tipo.ATENDENTE,
+        )
+        self.client.force_authenticate(user=atendente)
+        response = self.client.post(
+            '/api/users/',
+            {
+                'username': 'promovido',
+                'email': 'promovido@test.com',
+                'password': 'senha12345',
+                'type': UserModel.Tipo.ADMIN,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_cria_operador(self):
+        admin = UserModel.objects.create_user(
+            username='chefe', email='chefe@test.com', password='senha12345',
+            type=UserModel.Tipo.ADMIN,
+        )
+        self.client.force_authenticate(user=admin)
+        response = self.client.post(
+            '/api/users/',
+            {
+                'username': 'novo_mecanico',
+                'email': 'novo_mecanico@test.com',
+                'password': 'senha12345',
+                'type': UserModel.Tipo.MECANICO,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['type'], UserModel.Tipo.MECANICO)
+
     def test_user_sem_type_nao_e_operador(self):
         user = UserModel.objects.create_user(
             username='cliente',
