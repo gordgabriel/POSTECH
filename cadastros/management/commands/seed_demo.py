@@ -43,7 +43,7 @@ class Command(BaseCommand):
                 ],
             },
             {
-                'cpf_cnpj': '863.735.940-91',
+                'cpf_cnpj': '863.735.940-09',
                 'nome': 'Ana Costa',
                 'email': 'ana.costa@email.com',
                 'telefone': '21998765432',
