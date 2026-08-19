@@ -1518,3 +1518,105 @@ class HistoricoClienteVeiculoTests(OSTestCaseBase):
         url = f'/api/ordens-servico/?cliente={self.cliente.id}'
         self.assertEqual(self.ids(url), [])
         self.assertEqual(self.ids(url + '&is_active=false'), [self.os_joao.id])
+
+
+class PropostaEmAvaliacaoTests(OSTestCaseBase):
+    def setUp(self):
+        super().setUp()
+        self.os = self.criar_os()
+        self.os.status = StatusOS.EM_DIAGNOSTICO
+        self.os.save()
+        self.item = ItemServicoOS.objects.create(
+            ordem_servico=self.os,
+            servico=self.servico,
+            quantidade=1,
+            preco_unitario=self.servico.preco,
+        )
+        self.orcamento = Orcamento.gerar_para_os(self.os)
+
+    def enviar(self):
+        self.client.post(f'/api/orcamentos/{self.orcamento.id}/enviar/')
+        self.orcamento.refresh_from_db()
+
+    def test_remover_item_de_orcamento_enviado_retorna_400(self):
+        self.enviar()
+        total_antes = self.orcamento.valor_total
+
+        response = self.client.delete(f'/api/itens-servico/{self.item.id}/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.orcamento.refresh_from_db()
+        self.assertTrue(ItemServicoOS.objects.filter(pk=self.item.pk).exists())
+        self.assertEqual(self.orcamento.valor_total, total_antes)
+
+    def test_alterar_quantidade_de_orcamento_enviado_retorna_400(self):
+        self.enviar()
+
+        response = self.client.patch(
+            f'/api/itens-servico/{self.item.id}/',
+            {'quantidade': 5},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.quantidade, 1)
+
+    def test_remover_peca_de_orcamento_enviado_nao_mexe_no_estoque(self):
+        item_peca = ItemPecaOS.objects.create(
+            ordem_servico=self.os,
+            peca=self.peca,
+            quantidade=2,
+            preco_unitario=self.peca.preco,
+        )
+        self.enviar()
+        reservada_antes = self.peca.quantidade_reservada
+
+        response = self.client.delete(f'/api/itens-peca/{item_peca.id}/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.peca.refresh_from_db()
+        self.assertTrue(ItemPecaOS.objects.filter(pk=item_peca.pk).exists())
+        self.assertEqual(self.peca.quantidade_reservada, reservada_antes)
+
+    def test_antes_do_envio_o_item_continua_editavel(self):
+        response = self.client.patch(
+            f'/api/itens-servico/{self.item.id}/',
+            {'quantidade': 3},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.orcamento.refresh_from_db()
+        self.assertEqual(
+            self.orcamento.valor_total,
+            self.servico.preco * 3,
+        )
+
+    def test_recusa_ainda_descarta_os_itens(self):
+        self.enviar()
+        response = self.client.post(f'/api/orcamentos/{self.orcamento.id}/recusar/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.orcamento.refresh_from_db()
+        self.os.refresh_from_db()
+        self.assertEqual(self.orcamento.status, Orcamento.Status.RECUSADO)
+        self.assertFalse(ItemServicoOS.objects.filter(pk=self.item.pk).exists())
+        self.assertEqual(self.os.status, StatusOS.EM_DIAGNOSTICO)
+
+    def test_reparo_adicional_nao_e_bloqueado(self):
+        self.enviar()
+
+        response = self.client.post(
+            '/api/itens-servico/',
+            {
+                'ordem_servico': self.os.id,
+                'servico': self.servico.id,
+                'quantidade': 1,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        self.orcamento.refresh_from_db()
+        self.assertEqual(self.orcamento.valor_total, self.servico.preco)

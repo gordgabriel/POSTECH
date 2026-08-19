@@ -35,6 +35,8 @@ class ItemServicoOS(ItemOSBase):
     def save(self, *args, **kwargs):
         if self.preco_unitario is None:
             self.preco_unitario = self.servico.preco
+        if self.pk is not None:
+            self.validar_proposta_em_avaliacao()
         super().save(*args, **kwargs)
         self.sincronizar_orcamento()
 

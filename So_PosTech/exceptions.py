@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import ProtectedError, RestrictedError
 from rest_framework import status
 from rest_framework.response import Response
@@ -5,7 +6,13 @@ from rest_framework.views import exception_handler as drf_exception_handler
 
 
 def api_exception_handler(exc, context):
-    """Traduz o PROTECT do domínio em 409, em vez de deixar subir como 500."""
+    """Traduz erros do domínio em resposta da API, em vez de deixar subir como 500."""
+    if isinstance(exc, DjangoValidationError):
+        return Response(
+            {'detail': exc.messages},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     if isinstance(exc, (ProtectedError, RestrictedError)):
         objetos = getattr(exc, 'protected_objects', None) or getattr(
             exc, 'restricted_objects', [],

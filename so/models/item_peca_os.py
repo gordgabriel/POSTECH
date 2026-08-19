@@ -46,6 +46,9 @@ class ItemPecaOS(ItemOSBase):
         if self.preco_unitario is None:
             self.preco_unitario = self.peca.preco
 
+        if self.pk is not None:
+            self.validar_proposta_em_avaliacao()
+
         # Incluir item é montar a proposta, e proposta não segura peça: a
         # reserva acontece na aprovação do orçamento.
         with transaction.atomic():
@@ -60,6 +63,7 @@ class ItemPecaOS(ItemOSBase):
             self.sincronizar_orcamento()
 
     def delete(self, *args, **kwargs):
+        self.validar_proposta_em_avaliacao()
         with transaction.atomic():
             if self.esta_reservado:
                 EstoqueService.liberar(self.peca, self.quantidade)
