@@ -14,8 +14,14 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Em Docker as variáveis já chegam pelo ambiente do contêiner; rodando o
+# runserver direto, é isto que faz os os.getenv() abaixo enxergarem o .env.
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
