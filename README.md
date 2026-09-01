@@ -8,6 +8,59 @@ estoque de peças e insumos, com reserva e baixa amarradas ao fluxo da OS.
 
 Monolito em camadas, Django + Django REST Framework, autenticação JWT e autorização por papel.
 
+## Índice
+
+- [Como rodar](#como-rodar) — o caminho rápido, com ou sem Docker
+- [Stack](#stack) e [escolha do banco de dados](#escolha-do-banco-de-dados)
+- [Configuração](#configuração-o-arquivo-env) — o `.env`, para quando for preciso
+- [Rodando em Docker](#rodando-em-docker)
+- [Autenticação](#autenticação) e [papéis e permissões](#papéis-e-permissões) — quem pode o quê
+- [Fluxo de uma OS](#fluxo-de-uma-os-do-começo-ao-fim) — do cadastro do cliente à entrega do veículo
+- [Estoque](#estoque) e [notificações](#notificações)
+- [Endpoints](#endpoints) e [códigos de erro](#erros)
+- [Testes](#testes), [estrutura do código](#estrutura) e [documentação de domínio](#documentação-de-domínio)
+
+## Como rodar
+
+Com Docker, um comando sobe o ambiente inteiro — banco, migrations, dados de exemplo e API:
+
+```bash
+docker compose up --build
+```
+
+Sem Docker, com Python 3.11+:
+
+```bash
+python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py seed_users
+python manage.py seed_demo
+python manage.py runserver
+```
+
+Nos dois casos não é preciso criar arquivo de configuração nem informar credencial nenhuma. Quando
+terminar:
+
+| | |
+|---|---|
+| Documentação da API | http://localhost:8000/api/docs/ |
+| Usuário para entrar | `admin`, senha `oficina123` |
+| Obter o token | `POST /api/token/` com esse usuário e senha |
+| Usar o token | cabeçalho `Authorization: Bearer <access>` |
+
+Os cinco papéis do sistema — atendente, mecânico, estoquista, admin e cliente — usam a mesma senha e
+estão descritos em [Autenticação](#autenticação). O banco já vem com clientes, veículos, serviços e peças
+de exemplo.
+
+Para percorrer o ciclo completo de uma Ordem de Serviço, da identificação do cliente até a entrega do
+veículo, siga o roteiro em [Fluxo de uma OS](#fluxo-de-uma-os-do-começo-ao-fim) ou importe o
+`postman_collection.json`, que traz a sequência pronta e na ordem certa.
+
+Além do Swagger, a documentação está em `/api/redoc/` e o schema OpenAPI cru em `/api/schema/`.
+O `.env` só entra se quiser apontar para outro banco ou enviar e-mail de verdade; sem ele, as
+notificações são registradas em log e nenhuma operação de negócio é interrompida.
+
 ## Stack
 
 | | |
@@ -16,9 +69,9 @@ Monolito em camadas, Django + Django REST Framework, autenticação JWT e autori
 | Framework | Django 4.2 + Django REST Framework 3.15 |
 | Autenticação | SimpleJWT |
 | Documentação | drf-spectacular (Swagger / Redoc) |
-| Banco | PostgreSQL no Neon (SQLite no modo local) |
+| Banco | PostgreSQL — em contêiner no Docker, ou no Neon (SQLite ao rodar sem Docker) |
 | Testes | `unittest` do Django + coverage |
-| Container | Docker |
+| Container | Docker e Docker Compose |
 
 ## Escolha do banco de dados
 
@@ -43,38 +96,6 @@ causa disso — o mesmo `manage.py migrate` e os mesmos models valem para os doi
 
 O SQLite continua sendo o padrão quando `DB_HOST` não está definido. É a saída para clonar o repositório
 e rodar a suíte de testes sem depender de rede — não é o alvo de produção.
-
-## Rodando local
-
-Requer Python 3.11+.
-
-```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt -r requirements-dev.txt
-
-python manage.py migrate
-python manage.py seed_users      # cria os cinco papéis
-python manage.py seed_demo       # clientes, veículos, serviços e peças de exemplo
-python manage.py runserver
-```
-
-Assim, sem `.env`, o projeto sobe em SQLite com `DEBUG=True` e já dá para navegar pela API inteira. Para
-apontar para o Neon e ligar o envio de e-mail, crie o `.env` como descrito em
-[Configuração](#configuração-o-arquivo-env).
-
-Se você não quiser depender de um servidor SMTP enquanto desenvolve, esta linha no `.env` faz as
-mensagens saírem impressas no terminal em vez de serem enviadas:
-
-```ini
-EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
-```
-
-A documentação da API fica em `http://localhost:8000/api/docs/` (Swagger) e `/api/redoc/`. O schema
-OpenAPI cru está em `/api/schema/`.
-
-Há também uma collection do Postman na raiz (`postman_collection.json`), com todos os endpoints e uma
-pasta com o fluxo completo da OS na ordem em que ele acontece.
 
 ## Configuração: o arquivo `.env`
 
@@ -122,13 +143,11 @@ criptografada. `DB_PORT` é sempre `5432`.
 
 ### Trocando de banco
 
-A chave é uma linha só do `settings.py`:
+A troca é automática e não envolve mexer no código. A aplicação olha o `DB_HOST` na subida e decide
+sozinha: preenchido, usa o Postgres; vazio ou ausente, usa o SQLite. Nenhuma migration muda, nenhum model
+muda, nenhum arquivo `.py` é tocado.
 
-```python
-if os.getenv('DB_HOST'):   # tem host → Postgres. Não tem → SQLite
-```
-
-Preencher o `DB_HOST` já basta. Nenhuma migration muda, nenhum model muda. Depois de editar o `.env`:
+Depois de mexer no `.env`:
 
 1. **Reinicie o servidor** — o arquivo é lido uma vez, na subida.
 2. **Rode as migrations**, porque o banco do Neon começa vazio:
@@ -167,25 +186,55 @@ com cada um.
 
 ## Rodando em Docker
 
-```bash
-docker build -t oficina-api .
-docker run --rm -p 8000:8000 --env-file .env oficina-api
-```
-
-A imagem sobe com gunicorn em `0.0.0.0:8000` e lê o mesmo `.env` da seção anterior — com o `DB_HOST`
-preenchido, o contêiner fala direto com o Neon e não precisa de banco local nenhum. Vale conferir que o
-`--env-file` chegou: sem as variáveis, o contêiner sobe em SQLite dentro dele mesmo, funciona
-normalmente e perde tudo quando morre.
-
-As migrations não rodam sozinhas no start; execute-as uma vez contra o banco alvo:
+Um comando sobe o ambiente inteiro:
 
 ```bash
-docker run --rm --env-file .env oficina-api python manage.py migrate
+docker compose up --build
 ```
+
+Isso levanta dois contêineres — o Postgres e a aplicação — e faz o resto sozinho: espera o banco aceitar
+conexão, aplica as migrations, roda os dois seeds e sobe a API com gunicorn. Ao terminar, o Swagger está
+em `http://localhost:8000/api/docs/` e dá para entrar com qualquer um dos cinco usuários.
+
+Não é preciso criar `.env` nem configurar nada antes. Sem SMTP configurado, as notificações são impressas
+no log em vez de enviadas, o que na verdade ajuda na demonstração — dá para ver cada e-mail da OS
+acontecendo:
+
+```bash
+docker compose logs -f api
+```
+
+Para derrubar tudo, incluindo o volume com os dados do banco:
+
+```bash
+docker compose down -v
+```
+
+### Apontando para o Neon em vez do Postgres local
+
+Se existir um `.env` na raiz, os valores dele têm precedência sobre os padrões do `docker-compose.yml`.
+Com o `DB_HOST` preenchido, a aplicação fala direto com o Neon e o contêiner de banco fica sem uso. Nada
+mais muda: mesmo comando, mesma imagem.
+
+### Detalhes que valem saber
+
+O compose sobe com `DEBUG=False`, que é o certo para algo empacotado, mas isso significa que o Django não
+serve os arquivos estáticos do `/admin/` — a área administrativa aparece sem estilo. A API, o Swagger e o
+Redoc não dependem disso e funcionam normalmente. Para desenvolver com a página de erro detalhada:
+
+```bash
+DEBUG=True docker compose up
+```
+
+Os seeds rodam a cada subida. Como usam `update_or_create`, atualizam o que já existe em vez de duplicar,
+então subir o ambiente várias vezes é seguro. O banco fica no volume `postgres_data` e sobrevive a um
+`docker compose down` comum.
 
 ## Autenticação
 
-Toda a API exige JWT, com duas exceções: `POST /api/users/` (cadastro) e `GET /api/health/`.
+Toda a API exige JWT. Ficam abertas apenas as rotas que não teriam como exigi-lo: `POST /api/token/`
+e `/api/token/refresh/`, o cadastro em `POST /api/users/`, o `GET /api/health/` e a documentação
+(`/api/docs/`, `/api/redoc/` e `/api/schema/`).
 
 ```bash
 curl -X POST http://localhost:8000/api/token/ \
@@ -210,6 +259,19 @@ Quem se cadastra sozinho pelo `POST /api/users/` nasce sem papel, ou seja, como 
 no cadastro exige um admin autenticado.
 
 ## Papéis e permissões
+
+São cinco papéis, cada um com o seu pedaço do atendimento:
+
+| Papel | O que faz na oficina |
+|---|---|
+| **Atendente** | Recebe o cliente, cadastra o veículo, abre a OS, envia o orçamento e registra a entrega |
+| **Mecânico** | Faz o diagnóstico, inclui os serviços e as peças, executa os reparos e finaliza a OS |
+| **Estoquista** | Cadastra peças e registra a entrada delas no estoque |
+| **Admin** | Cuida do catálogo de serviços e dos usuários, e passa em qualquer operação dos demais |
+| **Cliente** | Aprova ou recusa o orçamento e acompanha as próprias ordens de serviço |
+
+Repare que reserva e baixa de estoque não aparecem em papel nenhum: são automáticas, disparadas pela
+aprovação do orçamento e pela entrega do veículo. O estoquista repõe; quem consome é o fluxo da OS.
 
 O papel de cada usuário fica em `UserModel.type` e é aplicado por ação nos viewsets, via
 `PermissoesPorAcaoMixin`. O admin passa em qualquer operação de papel específico.
