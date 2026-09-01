@@ -26,7 +26,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      SECRET_KEY: ${SECRET_KEY:-chave-de-desenvolvimento-troque-em-producao}
+      SECRET_KEY:
       DEBUG: ${DEBUG:-False}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,0.0.0.0}
       DB_NAME: ${DB_NAME:-sopostech}
@@ -38,8 +38,8 @@ services:
       EMAIL_HOST: ${EMAIL_HOST:-smtp.gmail.com}
       EMAIL_PORT: ${EMAIL_PORT:-587}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
-      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
-      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_HOST_USER:
+      EMAIL_HOST_PASSWORD:
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-oficina@localhost}
       EMAIL_OPERACAO: ${EMAIL_OPERACAO:-operacao@localhost}
     ports:
