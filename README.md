@@ -28,7 +28,7 @@ Com Docker, um comando sobe o ambiente inteiro — banco, migrations, dados de e
 docker compose up --build
 ```
 
-Sem Docker, com Python 3.11+:
+Sem Docker, com **Python 3.11 ou 3.12** (o Django 4.2 não suporta 3.13 ou mais recente):
 
 ```bash
 python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
@@ -38,6 +38,12 @@ python manage.py seed_users
 python manage.py seed_demo
 python manage.py runserver
 ```
+
+A versão do Python importa aqui: em 3.13 ou mais recente o `pip install` falha ao compilar o
+driver do Postgres, porque as versões fixadas em `requirements.txt` são anteriores a elas. Se a sua
+padrão for mais nova, aponte a versão certa na criação da venv (`py -3.11 -m venv .venv` no Windows,
+`python3.11 -m venv .venv` no Linux e no macOS) — ou use o Docker, que já traz o Python 3.11 na
+imagem e não depende do que está instalado na máquina.
 
 Nos dois casos não é preciso criar arquivo de configuração nem informar credencial nenhuma. Quando
 terminar:
@@ -65,7 +71,7 @@ notificações são registradas em log e nenhuma operação de negócio é inter
 
 | | |
 |---|---|
-| Linguagem | Python 3.11 |
+| Linguagem | Python 3.11 ou 3.12 |
 | Framework | Django 4.2 + Django REST Framework 3.15 |
 | Autenticação | SimpleJWT |
 | Documentação | drf-spectacular (Swagger / Redoc) |
@@ -432,13 +438,28 @@ nada não achou nada.
 python manage.py test
 ```
 
-Com cobertura:
+Com cobertura, ignorando o que é gerado ou declarativo:
 
 ```bash
-coverage run --source=. manage.py test
-coverage report
+pip install -r requirements-dev.txt
+coverage run --source=. --omit='*/migrations/*,*/tests.py,manage.py,So_PosTech/settings.py,*/apps.py,*/admin.py' manage.py test
+coverage report -m
 coverage html          # relatório navegável em htmlcov/
 ```
+
+A última execução, com as versões fixadas em `requirements.txt`, deu **96% de cobertura total** —
+1123 linhas, 50 não cobertas. Os domínios críticos:
+
+| Módulo | Cobertura |
+|---|---|
+| `so/models/item_peca_os.py` — reserva e ajuste de estoque no item | 100% |
+| `so/models/orcamento.py` — geração, envio, aprovação e recusa | 99% |
+| `estoque/services.py` — reserva, liberação e baixa | 99% |
+| `so/models/ordem_servico.py` — máquina de estados e encerramento | 98% |
+| `so/views/` — todos os endpoints do atendimento | 100% |
+| `cadastros/validators.py` — CPF/CNPJ e placa | 100% |
+
+Bem acima dos 80% exigidos nos domínios críticos.
 
 São 149 testes sobre os fluxos críticos: máquina de estados e transições inválidas, geração automática e
 recálculo do orçamento, envio, aprovação, recusa inicial e recusa de adicional, reserva e baixa de
