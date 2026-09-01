@@ -9,8 +9,6 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${DB_PORT_EXTERNA:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-sopostech}"]
       interval: 5s
@@ -46,13 +44,9 @@ services:
       - "${PORTA:-8000}:8000"
     command: >
       sh -c "python manage.py migrate --noinput &&
-             python manage.py seed_users &&
-             python manage.py seed_demo &&
-             gunicorn So_PosTech.wsgi:application
-               --bind 0.0.0.0:8000
-               --workers 3
-               --timeout 60
-               --access-logfile -"
+      python manage.py seed_users &&
+      python manage.py seed_demo &&
+      gunicorn So_PosTech.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60 --access-logfile -"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3)"]
       interval: 15s
