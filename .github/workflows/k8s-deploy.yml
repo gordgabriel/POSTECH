@@ -1,0 +1,52 @@
+name: Mock Kubernetes Deploy
+
+on:
+  workflow_run:
+    workflows: [CI Multistage Pipeline]
+    types: [completed]
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  deploy:
+    name: Simulate Kubernetes Deployment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    env:
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Download built image
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Validate image artifact
+        if: github.event_name == 'workflow_run'
+        run: |
+          test -s postech-api.tar
+          docker load --input postech-api.tar
+          docker image inspect "postech-api:$IMAGE_TAG" > /dev/null
+          echo "Docker image postech-api:$IMAGE_TAG validated."
+
+      - name: Simulate Kubernetes rollout
+        run: |
+          echo "SIMULATION ONLY: no AWS credentials, Kubernetes cluster, or kubectl are used."
+          echo "Simulating deployment of postech-api:$IMAGE_TAG..."
+          echo "Simulated rollout status: successful"
+
+      - name: Deployment summary
+        run: |
+          {
+            echo "## Mock Kubernetes Deployment"
+            echo ""
+            echo "- Image: postech-api:$IMAGE_TAG"
+            echo "- Result: rollout simulated successfully"
+            echo "- Infrastructure: no AWS or Kubernetes cluster used"
+          } >> "$GITHUB_STEP_SUMMARY"
