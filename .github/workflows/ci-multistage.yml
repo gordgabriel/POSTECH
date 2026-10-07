@@ -3,6 +3,8 @@ name: CI Multistage Pipeline
 on:
   push:
     branches: [main, master]
+    paths-ignore:
+      - "k8s/**"
   workflow_dispatch:
 
 jobs:

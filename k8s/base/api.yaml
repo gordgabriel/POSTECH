@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postech-api
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postech-api
+  template:
+    metadata:
+      labels:
+        app: postech-api
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: api
+          image: postech-api:bootstrap
+          imagePullPolicy: Always
+          command: ["sh", "-c"]
+          args:
+            - >-
+              python manage.py migrate --noinput &&
+              python manage.py seed_users &&
+              python manage.py seed_demo &&
+              exec gunicorn So_PosTech.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DEBUG
+              value: "False"
+            - name: ALLOWED_HOSTS
+              value: "*"
+            - name: DB_HOST
+              value: postech-db
+            - name: DB_NAME
+              value: postech
+            - name: DB_USER
+              value: postech_user
+            - name: DB_PORT
+              value: "5432"
+            - name: EMAIL_BACKEND
+              value: django.core.mail.backends.console.EmailBackend
+            - name: DEFAULT_FROM_EMAIL
+              value: oficina@localhost
+            - name: EMAIL_OPERACAO
+              value: operacao@localhost
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: postech-secrets
+                  key: SECRET_KEY
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postech-secrets
+                  key: DB_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /api/health/
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health/
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+              ephemeral-storage: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+              ephemeral-storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postech-api
+spec:
+  type: NodePort
+  selector:
+    app: postech-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      nodePort: 30080
