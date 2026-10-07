@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths-ignore:
       - "k8s/**"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "k8s/**"
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -37,6 +42,7 @@ jobs:
           name: coverage-report
 
       - name: SonarCloud Scan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
