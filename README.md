@@ -470,6 +470,50 @@ por veículo, exclusão protegida e relatório de tempo médio.
 O CI (`.github/workflows/ci-sonarqube.yml`) roda a suíte com coverage a cada push em `main` e publica o
 resultado no SonarCloud.
 
+## Deploy local com Kind e Argo CD
+
+O deploy GitOps usa o Kind como cluster local e o Argo CD para sincronizar `k8s/overlays/kind`.
+Após um build bem-sucedido em `main` ou `master`, o GitHub Actions publica a imagem no GHCR e
+atualiza a tag monitorada pelo Argo CD. Commits que alteram somente `k8s/` não iniciam outro build.
+
+Pré-requisitos locais: Docker, `kind`, `kubectl` e acesso ao repositório GitHub. Depois de enviar as
+alterações para `main`, aguarde o workflow **Publish Image and Update GitOps** concluir e torne o
+pacote `ghcr.io/gordgabriel/postech` público nas configurações do pacote no GitHub. Isso permite que
+o Kind baixe a imagem sem credenciais adicionais.
+
+Crie o cluster e instale o Argo CD:
+
+```powershell
+kind create cluster --name postech
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl wait --for=condition=available --timeout=180s deployment/argocd-server -n argocd
+```
+
+Crie os secrets localmente; eles não devem ser adicionados ao Git:
+
+```powershell
+$djangoSecret = python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+$dbPassword = [guid]::NewGuid().ToString("N")
+kubectl create namespace postech --dry-run=client -o yaml | kubectl apply -f -
+kubectl create secret generic postech-secrets -n postech `
+   --from-literal=SECRET_KEY=$djangoSecret `
+   --from-literal=DB_PASSWORD=$dbPassword `
+   --from-literal=POSTGRES_PASSWORD=$dbPassword
+```
+
+Registre a aplicação e acompanhe a sincronização:
+
+```powershell
+kubectl apply -f k8s/argocd/application.yaml
+kubectl get applications -n argocd
+kubectl port-forward service/postech-api 8000:8000 -n postech
+```
+
+A API ficará disponível em `http://localhost:8000/api/docs/`. Se o repositório for privado, configure
+as credenciais Git do repositório no Argo CD. Se mantiver o pacote GHCR privado, crie também um
+`imagePullSecret` no namespace `postech` e referencie-o no Deployment.
+
 ## Estrutura
 
 ```
