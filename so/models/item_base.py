@@ -1,7 +1,9 @@
 import uuid
 
-from django.core.exceptions import ValidationError
 from django.db import models
+
+from oficina.atendimento.dominio import itens as dominio
+from So_PosTech.exceptions import traduzir_erros_de_dominio
 
 
 class ItemOSBase(models.Model):
@@ -18,45 +20,35 @@ class ItemOSBase(models.Model):
 
     @property
     def subtotal(self):
-        return self.quantidade * self.preco_unitario
+        return dominio.subtotal(self.quantidade, self.preco_unitario)
+
+    def _casos(self, *args, **kwargs):
+        from So_PosTech.container import atendimento
+
+        return atendimento(self, gravacao=(args, kwargs))
+
+    def _entidade(self):
+        from so.repositorios import ItemRepositorioDjango
+
+        return ItemRepositorioDjango.para_entidade(self)
+
+    def _orcamento(self, casos):
+        if self.orcamento_id is None:
+            return None
+        return casos.orcamentos.obter(self.orcamento_id)
 
     def validar_proposta_em_avaliacao(self):
-        """Item de orçamento enviado e ainda sem resposta não é alterado."""
-        from so.models.orcamento import Orcamento
-
-        if self.orcamento_id is None:
-            return
-
-        aguardando = (
-            self.orcamento.status == Orcamento.Status.PENDENTE
-            and self.orcamento.data_envio is not None
-        )
-        if aguardando:
-            raise ValidationError(
-                f'O orçamento {self.orcamento.sequencia} está aguardando a '
-                f'resposta do cliente e não pode ser alterado. Registre a '
-                f'recusa para remontar a proposta.',
-            )
-
-    def delete(self, *args, **kwargs):
-        self.validar_proposta_em_avaliacao()
-        return super().delete(*args, **kwargs)
+        with traduzir_erros_de_dominio():
+            dominio.validar_proposta_em_avaliacao(self._orcamento(self._casos()))
 
     def sincronizar_orcamento(self):
-        """
-        Política: itens incluídos, então gerar o orçamento automaticamente.
+        with traduzir_erros_de_dominio():
+            self._casos().sincronizar_orcamento.executar(self._entidade())
 
-        Item ainda sem orçamento entra no orçamento aberto da OS, criando um se
-        não houver. Item que já pertence a um orçamento ainda não enviado só
-        recalcula o total, para o valor acompanhar mudança de quantidade.
-        """
-        from so.models.orcamento import Orcamento
+    def save(self, *args, **kwargs):
+        with traduzir_erros_de_dominio():
+            self._casos(*args, **kwargs).salvar_item.executar(self._entidade())
 
-        if self.orcamento_id is None:
-            Orcamento.gerar_para_os(self.ordem_servico)
-            return
-
-        if self.orcamento.status == Orcamento.Status.PENDENTE and (
-            self.orcamento.data_envio is None
-        ):
-            self.orcamento.recalcular_total()
+    def delete(self, *args, **kwargs):
+        with traduzir_erros_de_dominio():
+            return self._casos(*args, **kwargs).remover_item.executar(self._entidade())
