@@ -1,4 +1,4 @@
-e# Sistema Integrado de Atendimento e Execução de Serviços
+# Sistema Integrado de Atendimento e Execução de Serviços
 
 Back-end da oficina mecânica — Tech Challenge Fase 1, Pós-Tech Software Architecture (FIAP), turma 15SOAT.
 
