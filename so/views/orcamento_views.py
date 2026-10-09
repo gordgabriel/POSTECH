@@ -13,6 +13,8 @@ from accounts.permissions import (
     PermissoesPorAcaoMixin,
     has_any_role,
 )
+from So_PosTech.container import atendimento
+from So_PosTech.exceptions import traduzir_erros_de_dominio
 from so.models import Orcamento
 from so.serializers import OrcamentoSerializer
 
@@ -27,8 +29,7 @@ class OrcamentoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     http_method_names = ['get', 'post', 'head', 'options']
 
-    # A resposta é do cliente, mas o atendente a registra quando ela chega por
-    # telefone ou balcão; o get_queryset impede o cliente de tocar orçamento alheio.
+    # O atendente registra a resposta quando ela chega por telefone ou balcão.
     _RESPONDER = [has_any_role(IsCliente, IsAtendente)]
     permissoes_por_acao = {
         'create': [IsMecanico],
@@ -46,9 +47,9 @@ class OrcamentoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
     def _responder(self, aprovado):
         orcamento = self.get_object()
         try:
-            orcamento.responder(aprovado=aprovado)
+            with traduzir_erros_de_dominio():
+                atendimento(orcamento).responder_orcamento.executar(orcamento.pk, aprovado)
         except EstoqueInsuficiente as exc:
-            # A OS fica pausada onde está; o atendente já foi notificado.
             return Response(
                 {
                     'detail': exc.messages,
@@ -75,7 +76,8 @@ class OrcamentoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         """Comando Enviar orçamento ao cliente -> OS Aguardando aprovação."""
         orcamento = self.get_object()
         try:
-            orcamento.enviar()
+            with traduzir_erros_de_dominio():
+                atendimento(orcamento).enviar_orcamento.executar(orcamento.pk)
         except DjangoValidationError as exc:
             return Response(
                 {'detail': exc.messages},

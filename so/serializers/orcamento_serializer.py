@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from So_PosTech.exceptions import traduzir_erros_de_dominio
 from so.models import Orcamento
 from so.serializers.item_peca_serializer import ItemPecaOSSerializer
 from so.serializers.item_servico_serializer import ItemServicoOSSerializer
@@ -38,7 +39,13 @@ class OrcamentoSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
+        from So_PosTech.container import atendimento
+
+        ordem_servico = validated_data['ordem_servico']
+        casos = atendimento(ordem_servico)
         try:
-            return Orcamento.gerar_para_os(validated_data['ordem_servico'])
+            with traduzir_erros_de_dominio():
+                orcamento = casos.gerar_orcamento.executar(ordem_servico.pk)
         except DjangoValidationError as exc:
             raise serializers.ValidationError(exc.messages)
+        return casos.orcamentos.modelo(orcamento.id)

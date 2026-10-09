@@ -1,55 +1,25 @@
 import uuid
 
-from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
 from cadastros.models import Cliente, Veiculo
-from estoque.services import EstoqueService
+from oficina.atendimento.dominio import ordem_servico as dominio
+from So_PosTech.exceptions import traduzir_erros_de_dominio
 
-
-class StatusOS(models.TextChoices):
-    """As seis etapas do atendimento. Encerrar uma OS não é etapa: é baixa,
-    registrada em is_active, e o status guarda até onde o serviço chegou."""
-
-    RECEBIDA = 'Recebida', 'Recebida'
-    EM_DIAGNOSTICO = 'EmDiagnostico', 'Em diagnóstico'
-    AGUARDANDO_APROVACAO = 'AguardandoAprovacao', 'Aguardando aprovação'
-    EM_EXECUCAO = 'EmExecucao', 'Em execução'
-    FINALIZADA = 'Finalizada', 'Finalizada'
-    ENTREGUE = 'Entregue', 'Entregue'
-
-
-# Invariante: o status só transita na sequência válida. Há dois retornos:
-# EmExecucao -> AguardandoAprovacao no reparo adicional, e
-# AguardandoAprovacao -> EmDiagnostico quando o cliente recusa o orçamento e
-# o mecânico refaz a proposta.
-TRANSICOES_VALIDAS = {
-    StatusOS.RECEBIDA: {StatusOS.EM_DIAGNOSTICO},
-    StatusOS.EM_DIAGNOSTICO: {StatusOS.AGUARDANDO_APROVACAO},
-    StatusOS.AGUARDANDO_APROVACAO: {
-        StatusOS.EM_EXECUCAO,
-        StatusOS.EM_DIAGNOSTICO,
-    },
-    StatusOS.EM_EXECUCAO: {StatusOS.FINALIZADA, StatusOS.AGUARDANDO_APROVACAO},
-    StatusOS.FINALIZADA: {StatusOS.ENTREGUE},
-    StatusOS.ENTREGUE: set(),
-}
-
-# Cada transição alimenta a data que sustenta o relatório de tempo médio.
-DATA_POR_STATUS = {
-    StatusOS.EM_DIAGNOSTICO: 'data_diagnostico',
-    StatusOS.EM_EXECUCAO: 'data_inicio_execucao',
-    StatusOS.FINALIZADA: 'data_finalizacao',
-    StatusOS.ENTREGUE: 'data_entrega',
-}
+# Gerado a partir do enum do núcleo: mesmos valores e rótulos.
+StatusOS = models.TextChoices(
+    'StatusOS',
+    [(status.name, (status.value, status.label)) for status in dominio.StatusOS],
+    module=__name__,
+)
+TRANSICOES_VALIDAS = dominio.TRANSICOES_VALIDAS
+DATA_POR_STATUS = dominio.DATA_POR_STATUS
 
 
 class OrdemServico(models.Model):
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-    # Queixa do cliente registrada na abertura.
     descricao = models.TextField()
-    # Preenchido pelo mecânico no evento "Diagnóstico realizado".
     diagnostico = models.TextField(null=True, blank=True)
     observacoes = models.TextField(null=True, blank=True)
     status = models.CharField(
@@ -57,7 +27,6 @@ class OrdemServico(models.Model):
         choices=StatusOS.choices,
         default=StatusOS.RECEBIDA,
     )
-    # PROTECT: OS é registro histórico, não se apaga em cascata.
     cliente = models.ForeignKey(
         Cliente,
         on_delete=models.PROTECT,
@@ -82,79 +51,46 @@ class OrdemServico(models.Model):
 
     @staticmethod
     def validar_transicao(status_atual, novo_status):
-        permitidos = TRANSICOES_VALIDAS.get(status_atual, set())
-        if novo_status not in permitidos:
-            raise ValidationError({
-                'status': (
-                    f'Transição inválida: "{status_atual}" não pode ir para '
-                    f'"{novo_status}". Transições permitidas: '
-                    f'{sorted(permitidos) or "nenhuma"}.'
-                ),
-            })
+        with traduzir_erros_de_dominio():
+            dominio.OrdemServico.validar_transicao(status_atual, novo_status)
 
     def transitar_para(self, novo_status):
-        """Transição validada com registro de datas e efeitos colaterais de estoque."""
-        if self.status == novo_status:
-            return
-        self.validar_transicao(self.status, novo_status)
-        self.status = novo_status
-        campo_data = DATA_POR_STATUS.get(novo_status)
-        if campo_data and getattr(self, campo_data) is None:
-            setattr(self, campo_data, timezone.now())
-        self.save()
+        """Transição validada com registro de datas e efeitos de estoque e notificação."""
+        from So_PosTech.container import atendimento
+
+        with traduzir_erros_de_dominio():
+            atendimento(self).transitar_os.executar(self.pk, novo_status)
 
     def encerrar(self):
-        """
-        Baixa do atendimento: o registro sai de circulação e o histórico fica.
+        from So_PosTech.container import atendimento
 
-        Encerrar não é etapa do serviço, por isso não mexe no status — ele
-        continua marcando até onde o atendimento chegou antes de ser encerrado.
-        As peças reservadas voltam ao estoque.
-        """
-        if not self.is_active:
-            raise ValidationError({'is_active': 'Esta OS já está encerrada.'})
-        if self.status == StatusOS.ENTREGUE:
-            raise ValidationError({
-                'is_active': (
-                    'OS entregue está concluída e não se encerra: o serviço '
-                    'foi prestado.'
-                ),
-            })
-
-        self.is_active = False
-        self.save(update_fields=['is_active', 'updated_at'])
-        EstoqueService.liberar_itens_os(self)
-
-        from notifications.services.os_notifications import notificar_os_encerrada
-        notificar_os_encerrada(self)
+        with traduzir_erros_de_dominio():
+            atendimento(self).encerrar_os.executar(self.pk)
         return self
 
     def save(self, *args, **kwargs):
-        baixar_estoque = False
-        status_anterior = None
-        notificar = False
+        # Toda gravação passa aqui (comando, admin ou seed): mudança de status
+        # é conferida pelo domínio e dispara e-mail e baixa de estoque.
+        from So_PosTech.container import atendimento
+        from so.repositorios import OrdemServicoRepositorioDjango as Repositorio
 
+        status_gravado = None
         if self.pk:
-            status_anterior = (
+            status_gravado = (
                 OrdemServico.objects.only('status').get(pk=self.pk).status
             )
-            if status_anterior != self.status:
-                self.validar_transicao(status_anterior, self.status)
-                campo_data = DATA_POR_STATUS.get(self.status)
-                if campo_data and getattr(self, campo_data) is None:
-                    setattr(self, campo_data, timezone.now())
-                if self.status == StatusOS.ENTREGUE:
-                    baixar_estoque = True
-                notificar = True
+
+        entidade = Repositorio.para_entidade(self)
+        with traduzir_erros_de_dominio():
+            mudou = entidade.confirmar_mudanca_de_status(status_gravado, timezone.now())
+        Repositorio.aplicar(entidade, self)
 
         super().save(*args, **kwargs)
 
-        if notificar:
-            from notifications.services.os_notifications import notificar_status_os
-            notificar_status_os(self, status_anterior)
-
-        if baixar_estoque:
-            EstoqueService.baixar_itens_os(self)
+        if mudou:
+            atendimento(self).efeitos_da_transicao.executar(
+                self.pk, self.status, status_gravado,
+            )
 
     def __str__(self):
         return f'OS {self.uuid} - {self.get_status_display()}'

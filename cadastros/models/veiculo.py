@@ -4,6 +4,7 @@ from django.db import models
 
 from cadastros.models.cliente import Cliente
 from cadastros.validators import validar_placa
+from oficina.cadastros.dominio.placa import normalizar_placa
 
 
 class Veiculo(models.Model):
@@ -29,7 +30,7 @@ class Veiculo(models.Model):
 
     def save(self, *args, **kwargs):
         if self.placa:
-            self.placa = self.placa.upper().replace('-', '')
+            self.placa = normalizar_placa(self.placa)
         super().save(*args, **kwargs)
 
     def __str__(self):

@@ -447,21 +447,22 @@ coverage report -m
 coverage html          # relatório navegável em htmlcov/
 ```
 
-A última execução, com as versões fixadas em `requirements.txt`, deu **96% de cobertura total** —
-1123 linhas, 50 não cobertas. Os domínios críticos:
+A última execução, com as versões fixadas em `requirements.txt`, deu **98% de cobertura total** —
+2288 linhas, 53 não cobertas. Os domínios críticos:
 
 | Módulo | Cobertura |
 |---|---|
-| `so/models/item_peca_os.py` — reserva e ajuste de estoque no item | 100% |
-| `so/models/orcamento.py` — geração, envio, aprovação e recusa | 99% |
-| `estoque/services.py` — reserva, liberação e baixa | 99% |
-| `so/models/ordem_servico.py` — máquina de estados e encerramento | 98% |
+| `oficina/atendimento/dominio/` — máquina de estados, orçamento, itens | 100% |
+| `oficina/atendimento/casos_de_uso/` — diagnosticar, enviar, responder, finalizar, entregar, encerrar, incluir itens | 100% |
+| `oficina/estoque/` — reserva tudo ou nada, liberação, baixa e alerta de mínimo | 100% |
+| `oficina/cadastros/dominio/` — CPF/CNPJ e placa | 100% |
+| `so/repositorios.py` — adaptador ORM do atendimento | 99% |
 | `so/views/` — todos os endpoints do atendimento | 100% |
-| `cadastros/validators.py` — CPF/CNPJ e placa | 100% |
 
 Bem acima dos 80% exigidos nos domínios críticos.
 
-São 149 testes sobre os fluxos críticos: máquina de estados e transições inválidas, geração automática e
+São 189 testes: 149 sobre os fluxos críticos pela API e pelos models, 8 das fachadas de compatibilidade
+(`so/test_fachadas.py`) e 32 do núcleo `oficina/`, que rodam sem banco e sem Django (`python -m unittest discover -s oficina/tests -t .`). Os fluxos cobertos: máquina de estados e transições inválidas, geração automática e
 recálculo do orçamento, envio, aprovação, recusa inicial e recusa de adicional, reserva e baixa de
 estoque, tudo ou nada com estoque insuficiente, alerta de mínimo, proteção do orçamento já enviado,
 validação de CPF/CNPJ e placa, permissão por papel, isolamento do cliente logado, histórico por cliente e
@@ -516,22 +517,45 @@ as credenciais Git do repositório no Argo CD. Se mantiver o pacote GHCR privado
 
 ## Estrutura
 
+O projeto segue a **Arquitetura Hexagonal** (portas e adaptadores). A regra de negócio mora num núcleo em
+Python puro, `oficina/`, que não importa Django; os apps Django são os adaptadores em volta dele.
+
 ```
-So_PosTech/     configuração do projeto: urls, settings e o handler de exceções da API
-accounts/       usuário, papéis, permissões e JWT
-cadastros/      cliente, veículo, serviço e os validadores de CPF/CNPJ e placa
-estoque/        peça, saldo e o EstoqueService (reserva, liberação e baixa)
-so/             ordem de serviço, orçamento, itens e o relatório de tempo médio
-notifications/  serviços de e-mail e templates
+oficina/                 NÚCLEO — Python puro, zero import de Django
+  atendimento/           contexto Atendimento e Execução
+    dominio/             OrdemServico, StatusOS, TRANSICOES_VALIDAS, Orcamento, itens, erros
+    portas/              contratos: repositórios e notificador
+    casos_de_uso/        um arquivo por comando da Ubíqua (diagnosticar, enviar, responder,
+                         finalizar, entregar, encerrar, incluir itens, gerar orçamento...)
+  estoque/               contexto Gestão de Peças e Insumos: Peca, reservar, liberar, baixar
+  cadastros/dominio/     value objects CpfCnpj e Placa
+  portas.py              transação e relógio, comuns aos contextos
+  tests/                 testes do núcleo, sem banco
+
+So_PosTech/              settings, urls, container.py (liga cada porta ao adaptador) e
+                         exceptions.py (erro do domínio -> o mesmo JSON da API)
+accounts/                usuário, papéis, permissões e JWT
+cadastros/               cliente, veículo e serviço; validators.py expõe o domínio aos campos
+estoque/                 peça; repositorios.py (ORM, com select_for_update) e a fachada EstoqueService
+so/                      ordem de serviço, orçamento, itens e o relatório de tempo médio;
+                         repositorios.py cumpre as portas do atendimento com o ORM
+notifications/           e-mails; adaptador.py cumpre as portas Notificador e AlertaDeEstoque
 ```
 
-Cada app segue a mesma divisão: `models/`, `serializers/`, `views/`, `urls.py`, `tests.py`. Regra de
-negócio mora no modelo ou no serviço de aplicação; a view traduz HTTP em comando de domínio, e domínio em
-HTTP.
+Quem depende de quem: views, admin e seeds chamam os **casos de uso**; os casos de uso aplicam o
+**domínio** e falam com o mundo externo só pelas **portas**; os **adaptadores** (ORM, e-mail) cumprem as
+portas. O núcleo não conhece nenhum adaptador.
 
-Os três contextos delimitados do desenho DDD estão mapeados nos apps: Atendimento e Execução em `so/`,
-Gestão de Peças e Insumos em `estoque/`, Gestão Administrativa em `cadastros/` e `accounts/`. A única
-travessia de escrita entre atendimento e estoque passa pelo `EstoqueService`.
+Os models continuam com os mesmos campos, tabelas e métodos (`transitar_para`, `gerar_para_os`, `enviar`,
+`responder`, `encerrar`, `EstoqueService`), que agora só repassam ao núcleo. O `save()` da OS segue como
+porta de entrada de toda gravação: a mudança de status passa pela invariante e dispara os efeitos (e-mail e
+baixa na entrega) venha do comando, do admin ou de um seed. Consultas (listar, detalhar, relatório)
+continuam lendo pelo ORM.
+
+Os três contextos delimitados do desenho DDD viraram pastas do núcleo: Atendimento e Execução em
+`oficina/atendimento`, Gestão de Peças e Insumos em `oficina/estoque`, Gestão Administrativa em
+`oficina/cadastros` (com `accounts/`). A única travessia entre atendimento e estoque são os casos de uso
+de reserva, liberação e baixa.
 
 ## Documentação de domínio
 

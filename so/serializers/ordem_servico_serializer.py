@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from oficina.atendimento.dominio.ordem_servico import veiculo_pertence_ao_cliente
 from so.models import OrdemServico
 from so.serializers.item_peca_serializer import ItemPecaOSSerializer
 from so.serializers.item_servico_serializer import ItemServicoOSSerializer
@@ -54,8 +55,15 @@ class OrdemServicoSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         veiculo = attrs.get('veiculo') or (self.instance and self.instance.veiculo)
         cliente = attrs.get('cliente') or (self.instance and self.instance.cliente)
-        if veiculo and cliente and veiculo.cliente_id != cliente.pk:
+        if veiculo and cliente and not veiculo_pertence_ao_cliente(
+            veiculo.cliente_id, cliente.pk,
+        ):
             raise serializers.ValidationError(
                 {'veiculo': 'O veículo informado não pertence ao cliente da OS.'},
             )
         return attrs
+
+    def create(self, validated_data):
+        from So_PosTech.container import atendimento
+
+        return atendimento().criar_os.executar(validated_data)

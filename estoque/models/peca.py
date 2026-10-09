@@ -2,6 +2,8 @@ import uuid
 
 from django.db import models
 
+from oficina.estoque.dominio.peca import calcular_disponivel, esta_abaixo_do_minimo
+
 
 class Peca(models.Model):
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
@@ -22,11 +24,11 @@ class Peca(models.Model):
 
     @property
     def quantidade_disponivel(self):
-        return self.quantidade - self.quantidade_reservada
+        return calcular_disponivel(self.quantidade, self.quantidade_reservada)
 
     @property
     def abaixo_do_minimo(self):
-        return self.quantidade_disponivel < self.estoque_minimo
+        return esta_abaixo_do_minimo(self.quantidade_disponivel, self.estoque_minimo)
 
     def __str__(self):
         return self.nome

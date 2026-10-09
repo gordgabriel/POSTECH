@@ -13,7 +13,10 @@ from accounts.permissions import (
     IsMecanico,
     PermissoesPorAcaoMixin,
 )
-from so.models import OrdemServico, StatusOS
+from oficina.atendimento.dominio.erros import ParecerObrigatorio
+from So_PosTech.container import atendimento
+from So_PosTech.exceptions import traduzir_erros_de_dominio
+from so.models import OrdemServico
 from so.serializers import OrdemServicoSerializer
 
 
@@ -21,8 +24,6 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
     serializer_class = OrdemServicoSerializer
     permission_classes = [IsAuthenticated]
 
-    # Cada comando pertence ao ator que o executa na oficina. Listar e detalhar
-    # ficam abertos: o get_queryset limita o cliente às próprias OS.
     permissoes_por_acao = {
         'create': [IsAtendente],
         'update': [IsAtendente],
@@ -58,12 +59,7 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         return queryset.filter(is_active=informado.lower() not in ('false', '0'))
 
     def _filtrar_por_historico(self, queryset):
-        """Modelo de leitura Histórico do cliente e do veículo.
-
-        ?cliente= e ?veiculo= aceitam id ou uuid, porque o serializer expõe os
-        dois. Valor que não é nenhum dos dois devolve lista vazia, não erro: é
-        consulta, e consulta que não acha nada não achou nada.
-        """
+        # ?cliente= e ?veiculo= aceitam id ou uuid.
         if self.action != 'list':
             return queryset
 
@@ -81,10 +77,11 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
                 queryset = queryset.filter(**{f'{campo}__uuid': informado})
         return queryset
 
-    def _transitar(self, ordem_servico, novo_status):
-        """Traduz o comando HTTP em transição de domínio; o erro vira 400."""
+    def _comando(self, ordem_servico, executar, exceto=()):
+        """Executa o caso de uso sobre a OS; erro de domínio vira 400."""
         try:
-            ordem_servico.transitar_para(novo_status)
+            with traduzir_erros_de_dominio(exceto):
+                executar(atendimento(ordem_servico))
         except DjangoValidationError as exc:
             return Response(
                 {'detail': exc.messages},
@@ -96,40 +93,42 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
     def diagnosticar(self, request, pk=None):
         """Comando Realizar diagnóstico -> status Em diagnóstico."""
         ordem_servico = self.get_object()
-        diagnostico = (request.data.get('diagnostico') or '').strip()
-        if not diagnostico:
+        parecer = request.data.get('diagnostico')
+        try:
+            return self._comando(
+                ordem_servico,
+                lambda casos: casos.realizar_diagnostico.executar(ordem_servico.pk, parecer),
+                exceto=ParecerObrigatorio,
+            )
+        except ParecerObrigatorio as exc:
             return Response(
-                {'diagnostico': ['Informe o parecer do diagnóstico.']},
+                {exc.campo: [exc.mensagem]},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
-
-        ordem_servico.diagnostico = diagnostico
-        if ordem_servico.status == StatusOS.EM_DIAGNOSTICO:
-            # Revisão do parecer: não há transição a fazer.
-            ordem_servico.save(update_fields=['diagnostico', 'updated_at'])
-            return Response(self.get_serializer(ordem_servico).data)
-        # transitar_para grava o diagnóstico junto; transição inválida não grava nada.
-        return self._transitar(ordem_servico, StatusOS.EM_DIAGNOSTICO)
 
     @action(detail=True, methods=['post'])
     def finalizar(self, request, pk=None):
         """Comando Finalizar OS -> status Finalizada."""
-        return self._transitar(self.get_object(), StatusOS.FINALIZADA)
+        ordem_servico = self.get_object()
+        return self._comando(
+            ordem_servico,
+            lambda casos: casos.finalizar_os.executar(ordem_servico.pk),
+        )
 
     @action(detail=True, methods=['post'])
     def entregar(self, request, pk=None):
         """Comando Registrar entrega do veículo -> Entregue + baixa de estoque."""
-        return self._transitar(self.get_object(), StatusOS.ENTREGUE)
+        ordem_servico = self.get_object()
+        return self._comando(
+            ordem_servico,
+            lambda casos: casos.registrar_entrega.executar(ordem_servico.pk),
+        )
 
     @action(detail=True, methods=['post'])
     def encerrar(self, request, pk=None):
         """Comando Encerrar OS: baixa o registro e libera as reservas."""
         ordem_servico = self.get_object()
-        try:
-            ordem_servico.encerrar()
-        except DjangoValidationError as exc:
-            return Response(
-                {'detail': exc.messages},
-                status=http_status.HTTP_400_BAD_REQUEST,
-            )
-        return Response(self.get_serializer(ordem_servico).data)
+        return self._comando(
+            ordem_servico,
+            lambda casos: casos.encerrar_os.executar(ordem_servico.pk),
+        )
