@@ -80,6 +80,7 @@ jobs:
         run: python -m pip install pip-audit
 
       # Django 4.2 is retained for compatibility; these findings have no fix listed for this release line.
+      # The djangorestframework CVEs are only fixed in 3.18.2, which requires Django 5.2.
       - name: Audit dependencies (accepted Django 4.2 advisories)
         run: |
           pip-audit --requirement requirements.txt \
@@ -90,7 +91,10 @@ jobs:
             --ignore-vuln PYSEC-2026-2091 \
             --ignore-vuln PYSEC-2026-2092 \
             --ignore-vuln PYSEC-2026-3717 \
-            --ignore-vuln PYSEC-2026-4035
+            --ignore-vuln PYSEC-2026-4035 \
+            --ignore-vuln CVE-2026-114136 \
+            --ignore-vuln CVE-2026-114137 \
+            --ignore-vuln CVE-2026-114138
 
   terraform_validate:
     name: Terraform Modules Validation
