@@ -6,6 +6,7 @@ from oficina.atendimento.dominio.erros import (
     EncerramentoInvalido,
     OrcamentoInvalido,
     PropostaEmAvaliacao,
+    RespostaConflitante,
     SemItensPendentes,
     TransicaoInvalida,
 )
@@ -23,6 +24,8 @@ from oficina.atendimento.dominio.orcamento import (
     proxima_sequencia,
 )
 from oficina.atendimento.dominio.ordem_servico import (
+    FORA_DA_LISTAGEM,
+    PRIORIDADE_NA_LISTAGEM,
     OrdemServico,
     StatusOS,
     veiculo_pertence_ao_cliente,
@@ -121,6 +124,19 @@ class OrdemServicoTests(TestCase):
         self.assertTrue(veiculo_pertence_ao_cliente(5, 5))
         self.assertFalse(veiculo_pertence_ao_cliente(5, 6))
 
+    def test_listagem_prioriza_o_que_esta_mais_perto_de_sair(self):
+        self.assertEqual(
+            PRIORIDADE_NA_LISTAGEM,
+            (
+                StatusOS.EM_EXECUCAO,
+                StatusOS.AGUARDANDO_APROVACAO,
+                StatusOS.EM_DIAGNOSTICO,
+                StatusOS.RECEBIDA,
+            ),
+        )
+        self.assertEqual(FORA_DA_LISTAGEM, (StatusOS.FINALIZADA, StatusOS.ENTREGUE))
+        self.assertEqual(set(PRIORIDADE_NA_LISTAGEM) | set(FORA_DA_LISTAGEM), set(StatusOS))
+
 
 class OrcamentoTests(TestCase):
     def novo(self, **kwargs):
@@ -151,6 +167,18 @@ class OrcamentoTests(TestCase):
             ctx.exception.mensagem,
             'Só é possível enviar orçamento pendente (status atual: aprovado).',
         )
+
+    def test_resposta_ja_registrada_aceita_reenvio_e_barra_contradicao(self):
+        self.assertFalse(self.novo().resposta_ja_registrada(True))
+        aprovado = self.novo(status=StatusOrcamento.APROVADO)
+        self.assertTrue(aprovado.resposta_ja_registrada(True))
+        with self.assertRaises(RespostaConflitante) as ctx:
+            aprovado.resposta_ja_registrada(False)
+        self.assertIn('já foi aprovado', ctx.exception.mensagem)
+        recusado = self.novo(status=StatusOrcamento.RECUSADO)
+        self.assertTrue(recusado.resposta_ja_registrada(False))
+        with self.assertRaises(RespostaConflitante):
+            recusado.resposta_ja_registrada(True)
 
     def test_resposta_so_depois_do_envio(self):
         with self.assertRaises(OrcamentoInvalido) as ctx:

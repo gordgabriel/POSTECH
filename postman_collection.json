@@ -19,6 +19,9 @@
     { "key": "os_id", "value": "1" },
     { "key": "orcamento_id", "value": "1" },
     { "key": "user_id", "value": "1" },
+    { "key": "os_uuid", "value": "" },
+    { "key": "orcamento_uuid", "value": "" },
+    { "key": "webhook_token", "value": "troque-por-um-token-longo" },
     { "key": "token_atendente", "value": "" },
     { "key": "token_mecanico", "value": "" },
     { "key": "token_estoquista", "value": "" },
@@ -459,6 +462,39 @@
           }
         },
         {
+          "name": "Abrir OS completa (cliente, veículo, serviços e peças)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "if (pm.response.code === 201) {",
+                "    pm.collectionVariables.set('os_id', pm.response.json().id);",
+                "    pm.collectionVariables.set('os_uuid', pm.response.json().uuid);",
+                "}"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente\": {\"cpf_cnpj\": \"390.533.447-05\", \"nome\": \"Ana Lima\", \"email\": \"ana@email.com\"},\n  \"veiculo\": {\"placa\": \"BRA2E19\", \"marca\": \"Honda\", \"modelo\": \"Fit\", \"ano\": 2019},\n  \"descricao\": \"Revisão dos 40 mil\",\n  \"servicos\": [{\"servico\": {{servico_id}}, \"quantidade\": 1}],\n  \"pecas\": [{\"peca\": {{peca_id}}, \"quantidade\": 2}]\n}"
+            },
+            "url": "{{base_url}}/api/ordens-servico/abrir/",
+            "description": "Acha o cliente pelo CPF/CNPJ e o veículo pela placa; nome/e-mail e marca/modelo/ano só são exigidos para cadastrar. Inclui os itens (preço do catálogo, orçamento gerado sozinho) e devolve a OS com a uuid. Tudo numa transação."
+          }
+        },
+        {
+          "name": "Consultar status da OS",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/ordens-servico/{{os_uuid}}/status/",
+            "description": "Aceita id ou uuid. Devolve id, uuid, status, status_display e atualizada_em."
+          }
+        },
+        {
           "name": "Detalhar OS",
           "request": { "method": "GET", "url": "{{base_url}}/api/ordens-servico/{{os_id}}/" }
         },
@@ -589,6 +625,7 @@
               "exec": [
                 "if (pm.response.code === 201) {",
                 "    pm.collectionVariables.set('orcamento_id', pm.response.json().id);",
+                "    pm.collectionVariables.set('orcamento_uuid', pm.response.json().uuid);",
                 "}"
               ]
             }
@@ -631,6 +668,23 @@
             "method": "POST",
             "url": "{{base_url}}/api/orcamentos/{{orcamento_id}}/recusar/",
             "description": "Recusa do orçamento inicial (sequencia 1): devolve a OS para EmDiagnostico, onde o mecânico revê os itens e monta outra proposta. Recusa de um adicional: devolve a OS para EmExecucao. Nenhuma das duas libera reserva, porque orçamento não aprovado nunca reserva."
+          }
+        },
+        {
+          "name": "Webhook de aprovação externa",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Webhook-Token", "value": "{{webhook_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orcamento\": \"{{orcamento_uuid}}\",\n  \"aprovado\": true\n}"
+            },
+            "url": "{{base_url}}/api/webhooks/orcamento/",
+            "description": "Sistema externo, sem JWT: vale o header X-Webhook-Token (variável WEBHOOK_TOKEN da API). Reenviar a mesma decisão devolve 200 sem repetir efeitos; decisão contrária devolve 409; estoque insuficiente devolve 409 com faltantes; token inválido devolve 403."
           }
         }
       ]

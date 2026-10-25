@@ -13,10 +13,40 @@ from accounts.permissions import (
     PermissoesPorAcaoMixin,
     has_any_role,
 )
+from oficina.atendimento.dominio.erros import RespostaConflitante
 from So_PosTech.container import atendimento
 from So_PosTech.exceptions import traduzir_erros_de_dominio
 from so.models import Orcamento
 from so.serializers import OrcamentoSerializer
+
+
+def executar_resposta(orcamento, executar):
+    try:
+        with traduzir_erros_de_dominio(exceto=RespostaConflitante):
+            executar(atendimento(orcamento))
+    except RespostaConflitante as exc:
+        return Response({'detail': [exc.mensagem]}, status=status.HTTP_409_CONFLICT)
+    except EstoqueInsuficiente as exc:
+        return Response(
+            {
+                'detail': exc.messages,
+                'faltantes': [
+                    {
+                        'peca': f['peca'].nome,
+                        'solicitado': f['solicitado'],
+                        'disponivel': f['disponivel'],
+                    }
+                    for f in exc.faltantes
+                ],
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+    except DjangoValidationError as exc:
+        return Response(
+            {'detail': exc.messages},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return None
 
 
 class OrcamentoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
@@ -46,29 +76,12 @@ class OrcamentoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
 
     def _responder(self, aprovado):
         orcamento = self.get_object()
-        try:
-            with traduzir_erros_de_dominio():
-                atendimento(orcamento).responder_orcamento.executar(orcamento.pk, aprovado)
-        except EstoqueInsuficiente as exc:
-            return Response(
-                {
-                    'detail': exc.messages,
-                    'faltantes': [
-                        {
-                            'peca': f['peca'].nome,
-                            'solicitado': f['solicitado'],
-                            'disponivel': f['disponivel'],
-                        }
-                        for f in exc.faltantes
-                    ],
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-        except DjangoValidationError as exc:
-            return Response(
-                {'detail': exc.messages},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        erro = executar_resposta(
+            orcamento,
+            lambda casos: casos.responder_orcamento.executar(orcamento.pk, aprovado),
+        )
+        if erro is not None:
+            return erro
         return Response(self.get_serializer(orcamento).data)
 
     @action(detail=True, methods=['post'])

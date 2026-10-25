@@ -1,7 +1,3 @@
-import re
-
-from django.db.models import Value
-from django.db.models.functions import Replace
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 
@@ -36,17 +32,4 @@ class ClienteViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         informado = self.request.query_params.get('cpf_cnpj')
         if not informado:
             return queryset
-
-        digitos = re.sub(r'\D', '', informado)
-        if not digitos:
-            return queryset.none()
-
-        return queryset.annotate(
-            documento=Replace(
-                Replace(
-                    Replace('cpf_cnpj', Value('.'), Value('')),
-                    Value('-'), Value(''),
-                ),
-                Value('/'), Value(''),
-            ),
-        ).filter(documento=digitos)
+        return queryset.por_documento(informado)

@@ -23,3 +23,15 @@ class PropostaEmAvaliacao(ErroDeDominio):
 
 class ParecerObrigatorio(ErroDeDominio):
     pass
+
+
+class RespostaConflitante(ErroDeDominio):
+    pass
+
+
+class CadastroIncompleto(ErroDeDominio):
+    pass
+
+
+class VeiculoDeOutroCliente(ErroDeDominio):
+    pass

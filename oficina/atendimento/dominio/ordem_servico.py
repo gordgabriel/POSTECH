@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
 
-from oficina.atendimento.dominio.erros import EncerramentoInvalido, TransicaoInvalida
+from oficina.atendimento.dominio.erros import (
+    CadastroIncompleto,
+    EncerramentoInvalido,
+    TransicaoInvalida,
+    VeiculoDeOutroCliente,
+)
 from oficina.enumeracao import Enumeracao
 
 
@@ -35,6 +40,15 @@ DATA_POR_STATUS = {
     StatusOS.FINALIZADA: 'data_finalizacao',
     StatusOS.ENTREGUE: 'data_entrega',
 }
+
+# Ordem da listagem; Finalizada e Entregue ficam de fora.
+PRIORIDADE_NA_LISTAGEM = (
+    StatusOS.EM_EXECUCAO,
+    StatusOS.AGUARDANDO_APROVACAO,
+    StatusOS.EM_DIAGNOSTICO,
+    StatusOS.RECEBIDA,
+)
+FORA_DA_LISTAGEM = (StatusOS.FINALIZADA, StatusOS.ENTREGUE)
 
 
 @dataclass
@@ -92,3 +106,18 @@ class OrdemServico:
 
 def veiculo_pertence_ao_cliente(cliente_do_veiculo_id, cliente_id):
     return cliente_do_veiculo_id == cliente_id
+
+
+def exigir_veiculo_do_cliente(cliente_do_veiculo_id, cliente_id):
+    if not veiculo_pertence_ao_cliente(cliente_do_veiculo_id, cliente_id):
+        raise VeiculoDeOutroCliente(
+            'O veículo informado não pertence ao cliente da OS.', campo='veiculo',
+        )
+
+
+def exigir_dados_para_cadastro(dados, obrigatorios, campo, situacao):
+    faltando = [nome for nome in obrigatorios if dados.get(nome) in (None, '')]
+    if faltando:
+        raise CadastroIncompleto(
+            f'{situacao}: informe {", ".join(faltando)} para cadastrar.', campo=campo,
+        )

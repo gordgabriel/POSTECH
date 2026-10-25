@@ -2,8 +2,27 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Value
+from django.db.models.functions import Replace
 
-from cadastros.validators import validar_cpf_cnpj
+from cadastros.validators import somente_digitos, validar_cpf_cnpj
+
+
+class ClienteQuerySet(models.QuerySet):
+    def por_documento(self, valor):
+        # Compara só os dígitos.
+        digitos = somente_digitos(valor)
+        if not digitos:
+            return self.none()
+        return self.annotate(
+            documento=Replace(
+                Replace(
+                    Replace('cpf_cnpj', Value('.'), Value('')),
+                    Value('-'), Value(''),
+                ),
+                Value('/'), Value(''),
+            ),
+        ).filter(documento=digitos)
 
 
 class Cliente(models.Model):
@@ -31,6 +50,8 @@ class Cliente(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ClienteQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'cliente'
