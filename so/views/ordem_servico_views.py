@@ -1,6 +1,11 @@
 import uuid
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Case, IntegerField, Value, When
+from django.http import Http404
+from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import extend_schema
+from rest_framework import serializers
 from rest_framework import status as http_status
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -14,10 +19,27 @@ from accounts.permissions import (
     PermissoesPorAcaoMixin,
 )
 from oficina.atendimento.dominio.erros import ParecerObrigatorio
+from oficina.atendimento.dominio.ordem_servico import (
+    FORA_DA_LISTAGEM,
+    PRIORIDADE_NA_LISTAGEM,
+)
 from So_PosTech.container import atendimento
 from So_PosTech.exceptions import traduzir_erros_de_dominio
 from so.models import OrdemServico
-from so.serializers import OrdemServicoSerializer
+from so.serializers import (
+    AberturaOSSerializer,
+    OrdemServicoSerializer,
+    StatusOSSerializer,
+)
+
+
+def _identificador(valor):
+    if valor.isdigit():
+        return 'id', int(valor)
+    try:
+        return 'uuid', uuid.UUID(valor)
+    except ValueError:
+        return None
 
 
 class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
@@ -26,6 +48,7 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
 
     permissoes_por_acao = {
         'create': [IsAtendente],
+        'abrir': [IsAtendente],
         'update': [IsAtendente],
         'partial_update': [IsAtendente],
         'destroy': [IsAdmin],
@@ -44,19 +67,38 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
         if not self.request.user.is_operador:
             # Cliente com login só enxerga as próprias OS.
             queryset = queryset.filter(cliente__usuario=self.request.user)
-        return self._filtrar_por_historico(self._filtrar_por_atividade(queryset))
+        queryset = self._filtrar_por_atividade(queryset)
+        return self._ordenar_por_prioridade(self._filtrar_por_historico(queryset))
 
     def _filtrar_por_atividade(self, queryset):
-        """OS encerrada sai de circulação; ?is_active=false traz o histórico."""
+        """Padrão: OS em andamento; false e todas trazem o histórico."""
         if self.action != 'list':
             return queryset
 
-        informado = self.request.query_params.get('is_active')
-        if informado is None:
-            return queryset.filter(is_active=True)
-        if informado.lower() in ('todas', 'all'):
+        informado = (self.request.query_params.get('is_active') or 'true').lower()
+        if informado in ('todas', 'all'):
             return queryset
-        return queryset.filter(is_active=informado.lower() not in ('false', '0'))
+        if informado in ('false', '0'):
+            return queryset.filter(is_active=False)
+        return queryset.filter(is_active=True).exclude(
+            status__in=[status.value for status in FORA_DA_LISTAGEM],
+        )
+
+    def _ordenar_por_prioridade(self, queryset):
+        if self.action != 'list':
+            return queryset
+
+        prioridade = Case(
+            *(
+                When(status=status.value, then=Value(posicao))
+                for posicao, status in enumerate(PRIORIDADE_NA_LISTAGEM)
+            ),
+            default=Value(len(PRIORIDADE_NA_LISTAGEM)),
+            output_field=IntegerField(),
+        )
+        return queryset.alias(prioridade=prioridade).order_by(
+            'prioridade', 'data_abertura', 'id',
+        )
 
     def _filtrar_por_historico(self, queryset):
         # ?cliente= e ?veiculo= aceitam id ou uuid.
@@ -67,14 +109,11 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
             informado = self.request.query_params.get(parametro)
             if not informado:
                 continue
-            if informado.isdigit():
-                queryset = queryset.filter(**{f'{campo}_id': int(informado)})
-            else:
-                try:
-                    uuid.UUID(informado)
-                except ValueError:
-                    return queryset.none()
-                queryset = queryset.filter(**{f'{campo}__uuid': informado})
+            chave = _identificador(informado)
+            if chave is None:
+                return queryset.none()
+            tipo, valor = chave
+            queryset = queryset.filter(**{f'{campo}__{tipo}': valor})
         return queryset
 
     def _comando(self, ordem_servico, executar, exceto=()):
@@ -87,6 +126,42 @@ class OrdemServicoViewSet(PermissoesPorAcaoMixin, viewsets.ModelViewSet):
                 {'detail': exc.messages},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
+        return Response(self.get_serializer(ordem_servico).data)
+
+    @extend_schema(responses={201: OrdemServicoSerializer})
+    @action(detail=False, methods=['post'], serializer_class=AberturaOSSerializer)
+    def abrir(self, request):
+        """Abre a OS com cliente, veículo, serviços e peças."""
+        entrada = self.get_serializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        dados = entrada.validated_data
+        try:
+            with traduzir_erros_de_dominio():
+                ordem_servico = atendimento().abrir_os.executar(
+                    cliente=dict(dados['cliente']),
+                    veiculo=dict(dados['veiculo']),
+                    descricao=dados['descricao'],
+                    observacoes=dados.get('observacoes'),
+                    servicos=[(i['servico'].pk, i['quantidade']) for i in dados['servicos']],
+                    pecas=[(i['peca'].pk, i['quantidade']) for i in dados['pecas']],
+                )
+        except DjangoValidationError as exc:
+            erros = exc.message_dict if hasattr(exc, 'error_dict') else exc.messages
+            raise serializers.ValidationError(erros) from exc
+        return Response(
+            OrdemServicoSerializer(ordem_servico).data,
+            status=http_status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['get'], serializer_class=StatusOSSerializer)
+    def status(self, request, pk=None):
+        """Status da OS, por id ou uuid."""
+        chave = _identificador(pk)
+        if chave is None:
+            raise Http404
+        tipo, valor = chave
+        ordem_servico = get_object_or_404(self.get_queryset(), **{tipo: valor})
+        self.check_object_permissions(request, ordem_servico)
         return Response(self.get_serializer(ordem_servico).data)
 
     @action(detail=True, methods=['post'])

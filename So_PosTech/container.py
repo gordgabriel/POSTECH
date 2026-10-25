@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from django.db import transaction
 from django.utils import timezone
 
+from oficina.atendimento.casos_de_uso.abrir_os import AbrirOS
 from oficina.atendimento.casos_de_uso.criar_os import CriarOS
 from oficina.atendimento.casos_de_uso.encerrar_os import EncerrarOS
 from oficina.atendimento.casos_de_uso.enviar_orcamento import EnviarOrcamento
@@ -19,7 +20,10 @@ from oficina.atendimento.casos_de_uso.incluir_itens import (
 )
 from oficina.atendimento.casos_de_uso.realizar_diagnostico import RealizarDiagnostico
 from oficina.atendimento.casos_de_uso.registrar_entrega import RegistrarEntrega
-from oficina.atendimento.casos_de_uso.responder_orcamento import ResponderOrcamento
+from oficina.atendimento.casos_de_uso.responder_orcamento import (
+    ReceberRespostaExterna,
+    ResponderOrcamento,
+)
 from oficina.atendimento.casos_de_uso.transitar_os import EfeitosDaTransicao, TransitarOS
 from oficina.estoque.casos_de_uso.alertar_reposicao import AlertarReposicao
 from oficina.estoque.casos_de_uso.baixar import BaixarItens, BaixarPeca
@@ -64,6 +68,7 @@ def estoque():
 
 def atendimento(*instancias, gravacao=((), {})):
     # `instancias`: models que quem chama já tem; o caso de uso trabalha sobre eles.
+    from cadastros.repositorios import CadastroRepositorioDjango
     from notifications.adaptador import NotificadorEmail
     from so.repositorios import (
         ItemRepositorioDjango,
@@ -85,11 +90,20 @@ def atendimento(*instancias, gravacao=((), {})):
     recalcular = RecalcularOrcamento(orcamentos, unidade)
     gerar = GerarOrcamento(orcamentos, unidade, recalcular)
     sincronizar = SincronizarOrcamento(orcamentos, gerar, recalcular)
+    responder = ResponderOrcamento(
+        orcamentos,
+        ordens,
+        transitar,
+        casos_estoque.reservar_itens,
+        notificador,
+        relogio,
+    )
 
     return SimpleNamespace(
         ordens=ordens,
         orcamentos=orcamentos,
         criar_os=CriarOS(ordens),
+        abrir_os=AbrirOS(CadastroRepositorioDjango(), ordens, itens, unidade),
         transitar_os=transitar,
         efeitos_da_transicao=EfeitosDaTransicao(
             ordens, notificador, casos_estoque.baixar_itens,
@@ -102,14 +116,8 @@ def atendimento(*instancias, gravacao=((), {})):
         recalcular_orcamento=recalcular,
         sincronizar_orcamento=sincronizar,
         enviar_orcamento=EnviarOrcamento(orcamentos, ordens, transitar, relogio),
-        responder_orcamento=ResponderOrcamento(
-            orcamentos,
-            ordens,
-            transitar,
-            casos_estoque.reservar_itens,
-            notificador,
-            relogio,
-        ),
+        responder_orcamento=responder,
+        receber_resposta_externa=ReceberRespostaExterna(orcamentos, responder),
         salvar_item=SalvarItem(
             itens,
             orcamentos,

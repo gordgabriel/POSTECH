@@ -10,14 +10,24 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from unittest import TestCase
 
+from oficina.atendimento.casos_de_uso.abrir_os import AbrirOS
 from oficina.atendimento.casos_de_uso.encerrar_os import EncerrarOS
 from oficina.atendimento.casos_de_uso.enviar_orcamento import EnviarOrcamento
 from oficina.atendimento.casos_de_uso.gerar_orcamento import (
     GerarOrcamento,
     RecalcularOrcamento,
 )
-from oficina.atendimento.casos_de_uso.responder_orcamento import ResponderOrcamento
+from oficina.atendimento.casos_de_uso.responder_orcamento import (
+    ReceberRespostaExterna,
+    ResponderOrcamento,
+)
 from oficina.atendimento.casos_de_uso.transitar_os import EfeitosDaTransicao, TransitarOS
+from oficina.atendimento.dominio.erros import (
+    CadastroIncompleto,
+    OrcamentoInvalido,
+    RespostaConflitante,
+    VeiculoDeOutroCliente,
+)
 from oficina.atendimento.dominio.orcamento import Orcamento, StatusOrcamento
 from oficina.atendimento.dominio.ordem_servico import OrdemServico, StatusOS
 from oficina.estoque.casos_de_uso.alertar_reposicao import AlertarReposicao
@@ -190,6 +200,7 @@ class CasosDeUsoTests(TestCase):
             ReservarItensDoOrcamento(pecas, unidade, reservar, alertar),
             o, Relogio(),
         )
+        self.receber = ReceberRespostaExterna(orcamentos, self.responder)
         self.transitar = transitar
         self.encerrar = EncerrarOS(o, o, LiberarItens(unidade, liberar))
 
@@ -241,6 +252,41 @@ class CasosDeUsoTests(TestCase):
         self.incluir(quantidade=1)
         self.assertEqual(self.gerar.executar(1).sequencia, 2)
 
+    def test_reenvio_da_mesma_resposta_externa_nao_repete_efeitos(self):
+        self.incluir(peca=1, quantidade=3)
+        orcamento = self.gerar.executar(1)
+        self.enviar.executar(orcamento.id)
+        self.receber.executar(orcamento.id, aprovado=True)
+        emails = list(self.oficina.emails)
+
+        repetida = self.receber.executar(orcamento.id, aprovado=True)
+
+        self.assertEqual(repetida.status, StatusOrcamento.APROVADO)
+        self.assertEqual(self.oficina.pecas[1].quantidade_reservada, 3)
+        self.assertEqual(self.oficina.ordens[1].status, StatusOS.EM_EXECUCAO)
+        self.assertEqual(self.oficina.emails, emails)
+
+    def test_resposta_externa_contraria_a_gravada_e_conflito(self):
+        self.incluir(peca=1, quantidade=2)
+        orcamento = self.gerar.executar(1)
+        self.enviar.executar(orcamento.id)
+        self.receber.executar(orcamento.id, aprovado=False)
+
+        with self.assertRaises(RespostaConflitante):
+            self.receber.executar(orcamento.id, aprovado=True)
+        self.assertEqual(self.oficina.orcamentos[orcamento.id].status, StatusOrcamento.RECUSADO)
+        self.assertEqual(self.oficina.ordens[1].status, StatusOS.EM_DIAGNOSTICO)
+        self.assertEqual(self.oficina.pecas[1].quantidade_reservada, 0)
+
+    def test_primeira_resposta_externa_segue_o_fluxo_normal(self):
+        self.incluir(peca=1, quantidade=2)
+        orcamento = self.gerar.executar(1)
+        with self.assertRaises(OrcamentoInvalido):
+            self.receber.executar(orcamento.id, aprovado=True)
+        self.enviar.executar(orcamento.id)
+        self.receber.executar(orcamento.id, aprovado=True)
+        self.assertEqual(self.oficina.pecas[1].quantidade_reservada, 2)
+
     def test_entrega_baixa_o_estoque_e_encerrar_libera(self):
         self.incluir(peca=1, quantidade=2)
         orcamento = self.gerar.executar(1)
@@ -267,3 +313,106 @@ class CasosDeUsoTests(TestCase):
         self.assertEqual(self.oficina.ordens[2].status, StatusOS.EM_EXECUCAO)
         self.assertEqual(self.oficina.pecas[1].quantidade_reservada, 0)
         self.assertIn(('encerrada', 2), self.oficina.emails)
+
+
+class Cadastros:
+    def __init__(self):
+        self.clientes = {}
+        self.veiculos = {}
+        self.criados = []
+
+    def cliente_por_documento(self, cpf_cnpj):
+        return self.clientes.get(cpf_cnpj)
+
+    def criar_cliente(self, dados):
+        novo_id = len(self.clientes) + 100
+        self.clientes[dados['cpf_cnpj']] = novo_id
+        self.criados.append(('cliente', dados))
+        return novo_id
+
+    def veiculo_por_placa(self, placa):
+        return self.veiculos.get(placa)
+
+    def criar_veiculo(self, dados, cliente_id):
+        novo_id = len(self.veiculos) + 200
+        self.veiculos[dados['placa']] = (novo_id, cliente_id)
+        self.criados.append(('veiculo', dados, cliente_id))
+        return novo_id
+
+
+class Abertura:
+    def __init__(self):
+        self.ordens = []
+        self.itens = []
+
+    def criar(self, dados):
+        ordem = OrdemServico(id=len(self.ordens) + 1, status=StatusOS.RECEBIDA)
+        self.ordens.append(dados)
+        return ordem
+
+    def incluir(self, os_id, catalogo, referencia_id, quantidade):
+        self.itens.append((os_id, catalogo, referencia_id, quantidade))
+
+
+class AbrirOSTests(TestCase):
+    def setUp(self):
+        self.cadastros = Cadastros()
+        self.abertura = Abertura()
+        self.abrir = AbrirOS(self.cadastros, self.abertura, self.abertura, Unidade())
+
+    def test_cadastra_cliente_e_veiculo_novos_e_inclui_os_itens(self):
+        ordem = self.abrir.executar(
+            cliente={'cpf_cnpj': '52998224725', 'nome': 'João', 'email': 'j@x.com'},
+            veiculo={'placa': 'ABC1D23', 'marca': 'Fiat', 'modelo': 'Uno', 'ano': 2015},
+            descricao='Barulho',
+            servicos=[(7, 1)],
+            pecas=[(3, 2)],
+        )
+        self.assertEqual(ordem.status, StatusOS.RECEBIDA)
+        self.assertEqual(
+            self.abertura.ordens,
+            [{'descricao': 'Barulho', 'observacoes': None, 'cliente_id': 100, 'veiculo_id': 200}],
+        )
+        self.assertEqual(self.abertura.itens, [(1, 'servico', 7, 1), (1, 'peca', 3, 2)])
+
+    def test_cliente_e_veiculo_existentes_dispensam_os_demais_dados(self):
+        self.cadastros.clientes['52998224725'] = 5
+        self.cadastros.veiculos['ABC1D23'] = (9, 5)
+        self.abrir.executar(
+            cliente={'cpf_cnpj': '52998224725'},
+            veiculo={'placa': 'ABC1D23'},
+            descricao='Retorno',
+        )
+        self.assertEqual(self.cadastros.criados, [])
+        self.assertEqual(self.abertura.ordens[0]['cliente_id'], 5)
+        self.assertEqual(self.abertura.ordens[0]['veiculo_id'], 9)
+
+    def test_veiculo_de_outro_cliente_barra_a_abertura(self):
+        self.cadastros.clientes['52998224725'] = 5
+        self.cadastros.veiculos['ABC1D23'] = (9, 6)
+        with self.assertRaises(VeiculoDeOutroCliente) as ctx:
+            self.abrir.executar(
+                cliente={'cpf_cnpj': '52998224725'}, veiculo={'placa': 'ABC1D23'},
+                descricao='x',
+            )
+        self.assertEqual(ctx.exception.campo, 'veiculo')
+        self.assertEqual(self.abertura.ordens, [])
+
+    def test_cadastro_novo_exige_os_dados_minimos(self):
+        with self.assertRaises(CadastroIncompleto) as ctx:
+            self.abrir.executar(
+                cliente={'cpf_cnpj': '52998224725', 'nome': 'João'},
+                veiculo={'placa': 'ABC1D23'}, descricao='x',
+            )
+        self.assertEqual(ctx.exception.campo, 'cliente')
+        self.assertIn('informe email', ctx.exception.mensagem)
+
+        self.cadastros.clientes['52998224725'] = 5
+        with self.assertRaises(CadastroIncompleto) as ctx:
+            self.abrir.executar(
+                cliente={'cpf_cnpj': '52998224725'},
+                veiculo={'placa': 'ABC1D23', 'marca': 'Fiat'}, descricao='x',
+            )
+        self.assertEqual(ctx.exception.campo, 'veiculo')
+        self.assertIn('informe modelo, ano', ctx.exception.mensagem)
+        self.assertEqual(self.abertura.ordens, [])

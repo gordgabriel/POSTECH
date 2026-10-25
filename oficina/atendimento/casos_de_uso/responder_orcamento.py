@@ -38,3 +38,17 @@ class ResponderOrcamento:
         ja_autorizou = self.ordens.possui_orcamento_aprovado(ordem_servico.id)
         self.transitar.executar(ordem_servico.id, destino_apos_recusa(ja_autorizou))
         return orcamento
+
+
+class ReceberRespostaExterna:
+    """Resposta vinda do webhook."""
+
+    def __init__(self, orcamentos, responder):
+        self.orcamentos = orcamentos
+        self.responder = responder
+
+    def executar(self, orcamento_id, aprovado):
+        orcamento = self.orcamentos.obter(orcamento_id)
+        if orcamento.resposta_ja_registrada(aprovado):
+            return orcamento
+        return self.responder.executar(orcamento_id, aprovado)

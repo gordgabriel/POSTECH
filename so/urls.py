@@ -6,6 +6,7 @@ from so.views import (
     ItemServicoOSViewSet,
     OrcamentoViewSet,
     OrdemServicoViewSet,
+    RespostaOrcamentoWebhookView,
     TempoMedioExecucaoView,
 )
 
@@ -20,6 +21,11 @@ urlpatterns = [
         'relatorios/tempo-medio-execucao/',
         TempoMedioExecucaoView.as_view(),
         name='tempo-medio-execucao',
+    ),
+    path(
+        'webhooks/orcamento/',
+        RespostaOrcamentoWebhookView.as_view(),
+        name='webhook-orcamento',
     ),
     path('', include(router.urls)),
 ]

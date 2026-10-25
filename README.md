@@ -186,6 +186,7 @@ qualquer para aquecer.
 | `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | vazio | Credenciais do remetente |
 | `DEFAULT_FROM_EMAIL` | `EMAIL_HOST_USER` | Remetente das mensagens |
 | `EMAIL_OPERACAO` | vazio | Caixa da oficina, que recebe os alertas de estoque |
+| `WEBHOOK_TOKEN` | vazio | Token do webhook de aprovação de orçamento. Vazio = webhook fechado |
 
 O `.env` está no `.gitignore` e não vai para o repositório — as credenciais do Neon e do e-mail ficam
 com cada um.
@@ -403,6 +404,8 @@ O envio é acessório: falha vira log e não desfaz a operação de negócio nem
 | CRUD | `/api/pecas/` | Catálogo de peças e saldo de estoque |
 | `GET` | `/api/pecas/alertas/` | Peças abaixo do estoque mínimo |
 | CRUD | `/api/ordens-servico/` | Ordens de serviço. Filtros `?cliente=`, `?veiculo=`, `?is_active=` |
+| `POST` | `/api/ordens-servico/abrir/` | Abre a OS com cliente, veículo, serviços e peças numa chamada; devolve a OS com a `uuid` |
+| `GET` | `/api/ordens-servico/{id}/status/` | Status atual da OS, por `id` ou `uuid` |
 | `POST` | `/api/ordens-servico/{id}/diagnosticar/` | Registra o parecer e transita |
 | `POST` | `/api/ordens-servico/{id}/finalizar/` | Conclui os serviços |
 | `POST` | `/api/ordens-servico/{id}/entregar/` | Devolve o veículo e baixa o estoque |
@@ -413,6 +416,7 @@ O envio é acessório: falha vira log e não desfaz a operação de negócio nem
 | `POST` | `/api/orcamentos/{id}/enviar/` | Encaminha ao cliente |
 | `POST` | `/api/orcamentos/{id}/aprovar/` | Autoriza, reserva peças e inicia a execução |
 | `POST` | `/api/orcamentos/{id}/recusar/` | Não autoriza e descarta os itens |
+| `POST` | `/api/webhooks/orcamento/` | Aprovação ou recusa vinda de sistema externo, autenticada pelo header `X-Webhook-Token` |
 | `GET` | `/api/relatorios/tempo-medio-execucao/` | Tempo médio entre início da execução e finalização |
 
 O relatório aceita `?de=` e `?ate=` em ISO 8601 e filtra pela data de finalização. Data sem fuso é lida no
@@ -421,6 +425,33 @@ fuso do projeto (America/Sao_Paulo).
 Os filtros `?cliente=` e `?veiculo=` aceitam tanto o `id` quanto o `uuid`, porque o serializer expõe os
 dois. Valor que não é nenhum dos dois devolve lista vazia, não erro — é consulta, e consulta que não achou
 nada não achou nada.
+
+A listagem de OS segue a fila de trabalho: Em execução, Aguardando aprovação, Em diagnóstico e Recebida,
+nessa ordem, e dentro de cada status as mais antigas primeiro. Finalizadas e Entregues saem da listagem
+padrão sem serem apagadas: aparecem em `?is_active=todas` e continuam acessíveis pelo `id`.
+`?is_active=false` traz as encerradas.
+
+A abertura (`/api/ordens-servico/abrir/`) acha o cliente pelo CPF/CNPJ (só os dígitos) e o veículo pela
+placa. Nome e e-mail do cliente, e marca, modelo e ano do veículo, só são exigidos quando é preciso
+cadastrá-los. Veículo que pertence a outro cliente recusa a abertura. Tudo roda numa transação: se um item
+falha, nada fica gravado. Os itens seguem a inclusão normal: o preço é congelado do catálogo, o orçamento é
+gerado sozinho e as peças só reservam estoque na aprovação.
+
+```json
+{
+  "cliente": {"cpf_cnpj": "390.533.447-05", "nome": "Ana Lima", "email": "ana@email.com"},
+  "veiculo": {"placa": "BRA2E19", "marca": "Honda", "modelo": "Fit", "ano": 2019},
+  "descricao": "Revisão dos 40 mil",
+  "servicos": [{"servico": 1, "quantidade": 1}],
+  "pecas": [{"peca": 3, "quantidade": 2}]
+}
+```
+
+O webhook (`/api/webhooks/orcamento/`) não usa JWT: o sistema externo manda o header
+`X-Webhook-Token` com o valor de `WEBHOOK_TOKEN` e o corpo `{"orcamento": "<uuid>", "aprovado": true}`.
+Sem token válido, a resposta é 403. Reenviar a mesma decisão devolve 200 sem repetir reserva nem e-mail.
+Decisão contrária à já registrada devolve 409, e estoque insuficiente também devolve 409, com a lista de
+`faltantes`.
 
 ## Erros
 

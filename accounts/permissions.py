@@ -1,3 +1,6 @@
+import hmac
+
+from django.conf import settings
 from rest_framework.permissions import BasePermission
 
 from accounts.models import UserModel
@@ -44,6 +47,15 @@ class IsCliente(BasePermission):
     def has_permission(self, request, view) -> bool:
         user = request.user
         return user.is_authenticated and user.is_cliente
+
+
+class TokenDeWebhook(BasePermission):
+    def has_permission(self, request, view) -> bool:
+        esperado = settings.WEBHOOK_TOKEN
+        recebido = request.headers.get('X-Webhook-Token', '')
+        return bool(esperado) and hmac.compare_digest(
+            recebido.encode(), esperado.encode(),
+        )
 
 
 def has_any_role(*roles: type[BasePermission]) -> type[BasePermission]:

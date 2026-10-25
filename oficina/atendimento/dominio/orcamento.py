@@ -1,7 +1,11 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
-from oficina.atendimento.dominio.erros import OrcamentoInvalido, SemItensPendentes
+from oficina.atendimento.dominio.erros import (
+    OrcamentoInvalido,
+    RespostaConflitante,
+    SemItensPendentes,
+)
 from oficina.atendimento.dominio.ordem_servico import StatusOS
 from oficina.enumeracao import Enumeracao
 
@@ -92,6 +96,16 @@ class Orcamento:
                 f'"{StatusOS.rotulo_de(status_os)}". Envie o orçamento ao cliente '
                 f'antes de registrar a resposta.',
             )
+
+    def resposta_ja_registrada(self, aprovado):
+        if self.status == StatusOrcamento.PENDENTE:
+            return False
+        if self.aprovado == aprovado:
+            return True
+        raise RespostaConflitante(
+            f'O orçamento {self.sequencia} já foi {self.status}; '
+            f'a nova resposta não substitui a anterior.',
+        )
 
     def registrar_resposta(self, aprovado, agora):
         self.status = StatusOrcamento.APROVADO if aprovado else StatusOrcamento.RECUSADO

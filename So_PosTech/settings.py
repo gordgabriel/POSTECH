@@ -208,3 +208,6 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
 # Caixa da oficina: recebe os alertas de estoque, que não são do cliente.
 EMAIL_OPERACAO = os.getenv('EMAIL_OPERACAO', '')
+
+# Token do webhook de orçamento; vazio deixa o webhook fechado.
+WEBHOOK_TOKEN = os.getenv('WEBHOOK_TOKEN', '')

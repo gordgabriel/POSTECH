@@ -62,3 +62,20 @@ class ItemRepositorio(ABC):
 
     @abstractmethod
     def remover(self, item): ...
+
+    @abstractmethod
+    def incluir(self, os_id, catalogo, referencia_id, quantidade): ...
+
+
+class CadastroRepositorio(ABC):
+    @abstractmethod
+    def cliente_por_documento(self, cpf_cnpj): ...
+
+    @abstractmethod
+    def criar_cliente(self, dados): ...
+
+    @abstractmethod
+    def veiculo_por_placa(self, placa): ...
+
+    @abstractmethod
+    def criar_veiculo(self, dados, cliente_id): ...

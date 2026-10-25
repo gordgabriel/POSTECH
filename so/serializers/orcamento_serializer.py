@@ -49,3 +49,8 @@ class OrcamentoSerializer(serializers.ModelSerializer):
         except DjangoValidationError as exc:
             raise serializers.ValidationError(exc.messages)
         return casos.orcamentos.modelo(orcamento.id)
+
+
+class RespostaExternaSerializer(serializers.Serializer):
+    orcamento = serializers.UUIDField(help_text='uuid do orçamento enviado ao cliente.')
+    aprovado = serializers.BooleanField(help_text='true aprova, false recusa.')

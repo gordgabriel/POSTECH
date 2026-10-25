@@ -239,3 +239,13 @@ class ItemRepositorioDjango(ItemRepositorio):
 
     def remover(self, item):
         return models.Model.delete(self._modelo(item), *self.args, **self.kwargs)
+
+    def incluir(self, os_id, catalogo, referencia_id, quantidade):
+        # O preço vem do catálogo no save do item.
+        if catalogo == 'peca':
+            return ItemPecaOS.objects.create(
+                ordem_servico_id=os_id, peca_id=referencia_id, quantidade=quantidade,
+            )
+        return ItemServicoOS.objects.create(
+            ordem_servico_id=os_id, servico_id=referencia_id, quantidade=quantidade,
+        )
