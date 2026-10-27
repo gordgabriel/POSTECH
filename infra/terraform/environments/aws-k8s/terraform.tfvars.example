@@ -1,0 +1,4 @@
+aws_region = "us-east-1"
+
+# Replace with the public IPv4 address used to administer the EKS API.
+cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
