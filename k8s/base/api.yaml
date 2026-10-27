@@ -3,7 +3,6 @@ kind: Deployment
 metadata:
   name: postech-api
 spec:
-  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -29,25 +28,10 @@ spec:
           ports:
             - name: http
               containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: postech-api-config
           env:
-            - name: DEBUG
-              value: "False"
-            - name: ALLOWED_HOSTS
-              value: "*"
-            - name: DB_HOST
-              value: postech-db
-            - name: DB_NAME
-              value: postech
-            - name: DB_USER
-              value: postech_user
-            - name: DB_PORT
-              value: "5432"
-            - name: EMAIL_BACKEND
-              value: django.core.mail.backends.console.EmailBackend
-            - name: DEFAULT_FROM_EMAIL
-              value: oficina@localhost
-            - name: EMAIL_OPERACAO
-              value: operacao@localhost
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
