@@ -502,49 +502,67 @@ por veículo, exclusão protegida e relatório de tempo médio.
 O CI (`.github/workflows/ci-sonarqube.yml`) roda a suíte com coverage a cada push em `main` e publica o
 resultado no SonarCloud.
 
-## Deploy local com Kind e Argo CD
+## Deploy local com Terraform, Kind e Argo CD
 
-O deploy GitOps usa o Kind como cluster local e o Argo CD para sincronizar `k8s/overlays/kind`.
-Após um build bem-sucedido em `main` ou `master`, o GitHub Actions publica a imagem no GHCR e
-atualiza a tag monitorada pelo Argo CD. Commits que alteram somente `k8s/` não iniciam outro build.
+O Terraform cria um cluster Kind novo (`postech-iac`) e, em um segundo estado, o namespace, Secret,
+PostgreSQL StatefulSet, PVC, Service e metrics-server. O Argo CD sincroniza apenas a API a partir de
+`k8s/overlays/local-iac`; assim, Terraform é o único responsável pelo banco. O cluster `postech`
+criado manualmente anteriormente continua usando `k8s/overlays/kind` e não é alterado por esse fluxo.
 
-Pré-requisitos locais: Docker, `kind`, `kubectl` e acesso ao repositório GitHub. Depois de enviar as
-alterações para `main`, aguarde o workflow **Publish Image and Update GitOps** concluir e torne o
-pacote `ghcr.io/gordgabriel/postech` público nas configurações do pacote no GitHub. Isso permite que
-o Kind baixe a imagem sem credenciais adicionais.
+Pré-requisitos: Docker Desktop com Linux containers, Terraform CLI, `kubectl` e acesso ao
+repositório GitHub. Depois de enviar as alterações para `main`, aguarde **Publish Image and Update
+GitOps** e torne `ghcr.io/gordgabriel/postech` público para o cluster poder baixar a imagem.
 
-Crie o cluster e instale o Argo CD:
+No PowerShell, na raiz do repositório:
 
 ```powershell
-kind create cluster --name postech
+$kindDir = "infra/terraform/environments/local-kind"
+$postgresDir = "infra/terraform/environments/local-postgres"
+
+terraform -chdir=$kindDir init
+terraform -chdir=$kindDir plan
+terraform -chdir=$kindDir apply
+$env:KUBECONFIG = terraform -chdir=$kindDir output -raw kubeconfig_path
+
+terraform -chdir=$postgresDir init
+terraform -chdir=$postgresDir plan
+terraform -chdir=$postgresDir apply
+kubectl wait --for=condition=ready pod -l app=postech-db -n postech --timeout=180s
+kubectl get pods,pvc -n postech
+```
+
+O Terraform gera `SECRET_KEY` e a senha PostgreSQL e cria `postech-secrets`. Os valores sensíveis
+ficam no state local: nunca versione `terraform.tfstate`, o kubeconfig ou arquivos `*.tfvars`.
+`--kubelet-insecure-tls` é habilitado no metrics-server somente porque Kind usa certificados locais;
+não use esse ajuste em produção.
+
+Instale o Argo CD e registre a aplicação no cluster criado pelo Terraform:
+
+```powershell
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 kubectl wait --for=condition=available --timeout=180s deployment/argocd-server -n argocd
-```
-
-Crie os secrets localmente; eles não devem ser adicionados ao Git:
-
-```powershell
-$djangoSecret = python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
-$dbPassword = [guid]::NewGuid().ToString("N")
-kubectl create namespace postech --dry-run=client -o yaml | kubectl apply -f -
-kubectl create secret generic postech-secrets -n postech `
-   --from-literal=SECRET_KEY=$djangoSecret `
-   --from-literal=DB_PASSWORD=$dbPassword `
-   --from-literal=POSTGRES_PASSWORD=$dbPassword
-```
-
-Registre a aplicação e acompanhe a sincronização:
-
-```powershell
-kubectl apply -f k8s/argocd/application.yaml
+kubectl apply -f k8s/argocd/application-local-iac.yaml
 kubectl get applications -n argocd
+kubectl get pods,hpa -n postech
 kubectl port-forward service/postech-api 8000:8000 -n postech
 ```
 
-A API ficará disponível em `http://localhost:8000/api/docs/`. Se o repositório for privado, configure
-as credenciais Git do repositório no Argo CD. Se mantiver o pacote GHCR privado, crie também um
-`imagePullSecret` no namespace `postech` e referencie-o no Deployment.
+A API ficará disponível por port-forward em `http://localhost:8000/api/docs/`. Se o repositório for
+privado, configure as credenciais Git do repositório no Argo CD. Se mantiver o pacote GHCR privado,
+crie também um `imagePullSecret` no namespace `postech` e referencie-o no Deployment.
+
+Para remover os recursos, destrua primeiro o stack de workloads e depois o cluster:
+
+```powershell
+terraform -chdir=$postgresDir destroy
+terraform -chdir=$kindDir destroy
+Remove-Item Env:KUBECONFIG
+```
+
+## Infraestrutura AWS com Terraform
+
+O ambiente não produtivo de EKS e RDS, seus pré-requisitos, custos e comandos de operação estão em [`infra/README.md`](infra/README.md). O CI valida os arquivos Terraform, mas não cria recursos AWS.
 
 ## Estrutura
 

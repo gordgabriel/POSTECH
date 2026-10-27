@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: postech
+resources:
+  - ../../base
+patches:
+  - path: rds-config-patch.yaml
+images:
+  - name: postech-api
+    newName: ghcr.io/gordgabriel/postech
+    newTag: aa32644cac371bc0498a60c1fcbef0bb6ff58e67

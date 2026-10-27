@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postech-api-config
+data:
+  DB_HOST: REPLACE_WITH_TERRAFORM_DATABASE_ADDRESS
+  DB_USER: REPLACE_WITH_TERRAFORM_DATABASE_USERNAME
+  DB_SSLMODE: require

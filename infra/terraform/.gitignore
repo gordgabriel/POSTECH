@@ -10,6 +10,9 @@
 *.tfstate
 *.tfstate.*
 
+# kubeconfig local contém certificados e credenciais do cluster Kind
+**/kubeconfig
+
 # Crash log files
 crash.log
 crash.*.log

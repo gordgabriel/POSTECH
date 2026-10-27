@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: postech
 resources:
   - ../../base
+  - database.yaml
 images:
   - name: postech-api
     newName: ghcr.io/gordgabriel/postech
