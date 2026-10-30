@@ -1,15 +1,110 @@
 # Sistema Integrado de Atendimento e Execução de Serviços
 
-Back-end da oficina mecânica — Tech Challenge Fase 1, Pós-Tech Software Architecture (FIAP), turma 15SOAT.
+Back-end da oficina mecânica — Tech Challenge Fase 2, Pós-Tech Software Architecture (FIAP), turma 15SOAT.
 
 API REST que cobre o ciclo da Ordem de Serviço (abertura, diagnóstico, orçamento, aprovação do cliente,
 execução, finalização e entrega), os cadastros de apoio (clientes, veículos, serviços) e o controle de
 estoque de peças e insumos, com reserva e baixa amarradas ao fluxo da OS.
 
-Monolito em camadas, Django + Django REST Framework, autenticação JWT e autorização por papel.
+Monolito em Arquitetura Hexagonal, Django + Django REST Framework, autenticação JWT e autorização por papel.
+
+| | |
+|---|---|
+| Vídeo demonstrativo | _link do vídeo_ |
+| Collection das APIs | [`postman_collection.json`](postman_collection.json) e Swagger em `/api/docs/` |
+
+## Fase 2: objetivos
+
+Com o aumento da demanda e a abertura de novas unidades, a oficina precisa de um sistema disponível,
+escalável e fácil de evoluir. Nesta fase a aplicação da Fase 1 evoluiu em quatro frentes:
+
+- **Qualidade do código**: refatoração para Arquitetura Hexagonal, com o domínio isolado em `oficina/`,
+  e testes automatizados cobrindo os fluxos críticos.
+- **APIs novas**: abertura completa da OS, consulta de status, webhook de aprovação do orçamento e
+  listagem priorizada pela fila de trabalho.
+- **Infraestrutura escalável**: aplicação em container, orquestrada no Kubernetes com HPA escalando os
+  pods da API conforme o consumo de CPU.
+- **Automação**: cluster e banco provisionados com Terraform, e pipeline de CI/CD que testa, gera a
+  imagem e publica a nova versão no cluster via GitOps (Argo CD).
+
+| Requisito | Onde está |
+|---|---|
+| Clean Code e Arquitetura Hexagonal | `oficina/` (núcleo) e [Estrutura](#estrutura) |
+| Testes automatizados | [Testes](#testes) |
+| APIs da fase | [Endpoints](#endpoints) |
+| Dockerfile e docker-compose | [Rodando em Docker](#rodando-em-docker) |
+| Manifestos Kubernetes | `k8s/` |
+| Terraform | `infra/` e [Deploy local](#deploy-local-com-terraform-kind-e-argo-cd) |
+| CI/CD | `.github/workflows/` e [Arquitetura](#arquitetura) |
+
+## Arquitetura
+
+### Componentes da aplicação
+
+```mermaid
+flowchart LR
+    cliente[Atendente, mecânico, cliente] -->|HTTP + JWT| api
+    externo[Sistema externo] -->|webhook + X-Webhook-Token| api
+
+    subgraph api[API Django]
+        direction LR
+        adaptadores[Views DRF, ORM, e-mail] --> casos[Casos de uso]
+        casos --> dominio[Domínio]
+        casos --> portas[Portas]
+        adaptadores -. implementam .-> portas
+    end
+
+    api --> db[(PostgreSQL)]
+    api --> email[Servidor de e-mail]
+```
+
+As views recebem a requisição e chamam os casos de uso do núcleo `oficina/`. O núcleo não conhece Django:
+fala com banco e e-mail só pelas portas, que os adaptadores implementam.
+
+### Infraestrutura provisionada
+
+```mermaid
+flowchart TB
+    tf[Terraform] -->|local-kind| kind
+    tf -->|local-postgres| ns
+
+    subgraph kind[Cluster Kind postech-iac]
+        subgraph ns[Namespace postech]
+            svc[Service NodePort postech-api] --> pods[Pods da API]
+            hpa[HPA 1 a 3 pods, CPU 70%] --> pods
+            cm[ConfigMap] --> pods
+            sec[Secret postech-secrets] --> pods
+            pods --> dbsvc[Service postech-db] --> db[(StatefulSet PostgreSQL + PVC)]
+        end
+        ms[metrics-server] --> hpa
+        argo[Argo CD]
+    end
+```
+
+O Terraform cria o cluster, o namespace, o Secret, o PostgreSQL e o metrics-server. O Argo CD aplica os
+manifestos da API (Deployment, Service, ConfigMap e HPA) a partir de `k8s/overlays/local-iac`. Na AWS o
+equivalente fica em `infra/terraform/environments/aws-k8s`, com EKS e RDS.
+
+### Fluxo de deploy
+
+```mermaid
+flowchart LR
+    push[Push na main] --> testes[Testes + Sonar]
+    push --> checks[Django checks, pip-audit, terraform validate]
+    testes --> build[Build da imagem]
+    checks --> build
+    build --> ghcr[Publica no GHCR]
+    ghcr --> gitops[Commit da nova tag em k8s/overlays]
+    gitops --> argo[Argo CD detecta a mudança]
+    argo --> cluster[Rolling da API no cluster]
+```
+
+A pipeline (`.github/workflows/ci-multistage.yml`) não acessa o cluster: ela publica a imagem e grava a
+nova tag no repositório. O Argo CD, rodando dentro do cluster, acompanha a `main` e aplica a versão nova.
 
 ## Índice
 
+- [Fase 2: objetivos](#fase-2-objetivos) e [arquitetura](#arquitetura)
 - [Como rodar](#como-rodar) — o caminho rápido, com ou sem Docker
 - [Stack](#stack) e [escolha do banco de dados](#escolha-do-banco-de-dados)
 - [Configuração](#configuração-o-arquivo-env) — o `.env`, para quando for preciso
@@ -19,6 +114,7 @@ Monolito em camadas, Django + Django REST Framework, autenticação JWT e autori
 - [Estoque](#estoque) e [notificações](#notificações)
 - [Endpoints](#endpoints) e [códigos de erro](#erros)
 - [Testes](#testes), [estrutura do código](#estrutura) e [documentação de domínio](#documentação-de-domínio)
+- [Deploy local com Terraform, Kind e Argo CD](#deploy-local-com-terraform-kind-e-argo-cd) e [infraestrutura AWS](#infraestrutura-aws-com-terraform)
 
 ## Como rodar
 
@@ -499,7 +595,7 @@ estoque, tudo ou nada com estoque insuficiente, alerta de mínimo, proteção do
 validação de CPF/CNPJ e placa, permissão por papel, isolamento do cliente logado, histórico por cliente e
 por veículo, exclusão protegida e relatório de tempo médio.
 
-O CI (`.github/workflows/ci-sonarqube.yml`) roda a suíte com coverage a cada push em `main` e publica o
+O CI (`.github/workflows/ci-multistage.yml`) roda a suíte com coverage a cada push em `main` e publica o
 resultado no SonarCloud.
 
 ## Deploy local com Terraform, Kind e Argo CD
