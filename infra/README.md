@@ -20,15 +20,15 @@ Pré-requisitos: Docker Desktop usando Linux containers, Terraform CLI e `kubect
 $kindDir = "infra/terraform/environments/local-kind"
 $postgresDir = "infra/terraform/environments/local-postgres"
 
-terraform -chdir=$kindDir init
-terraform -chdir=$kindDir plan
-terraform -chdir=$kindDir apply
-$env:KUBECONFIG = terraform -chdir=$kindDir output -raw kubeconfig_path
+terraform "-chdir=$kindDir" init
+terraform "-chdir=$kindDir" plan
+terraform "-chdir=$kindDir" apply
+$env:KUBECONFIG = terraform "-chdir=$kindDir" output -raw kubeconfig_path
 kubectl get nodes
 
-terraform -chdir=$postgresDir init
-terraform -chdir=$postgresDir plan
-terraform -chdir=$postgresDir apply
+terraform "-chdir=$postgresDir" init
+terraform "-chdir=$postgresDir" plan
+terraform "-chdir=$postgresDir" apply
 kubectl get pods,pvc -n postech
 kubectl top pods -n postech
 ```
@@ -40,8 +40,8 @@ Depois, instale o Argo CD no cluster conforme o README principal e aplique `k8s/
 Para remover o ambiente, destrua primeiro os workloads e depois o cluster, usando os mesmos diretórios e states:
 
 ```powershell
-terraform -chdir=$postgresDir destroy
-terraform -chdir=$kindDir destroy
+terraform "-chdir=$postgresDir" destroy
+terraform "-chdir=$kindDir" destroy
 Remove-Item Env:KUBECONFIG
 ```
 
@@ -100,12 +100,14 @@ Faça estes passos no diretório `infra/terraform/environments/aws-k8s`, após c
 	$secretArn = terraform output -raw database_master_secret_arn
 	$rdsCredentials = aws secretsmanager get-secret-value --secret-id $secretArn --query SecretString --output text | ConvertFrom-Json
 	$djangoSecret = python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+	$webhookToken = python -c "import secrets; print(secrets.token_urlsafe(32))"
 	kubectl create namespace postech --dry-run=client -o yaml | kubectl apply -f -
 	kubectl create secret generic postech-secrets -n postech `
 	  --from-literal=SECRET_KEY=$djangoSecret `
 	  --from-literal=DB_PASSWORD=$rdsCredentials.password `
+	  --from-literal=WEBHOOK_TOKEN=$webhookToken `
 	  --dry-run=client -o yaml | kubectl apply -f -
-	Remove-Variable rdsCredentials, djangoSecret, secretArn
+	Remove-Variable rdsCredentials, djangoSecret, webhookToken, secretArn
 	```
 
 4. Se Argo CD ainda não estiver instalado no EKS, instale-o conforme o procedimento da documentação oficial. Depois aplique `kubectl apply -f k8s/argocd/application-aws.yaml` para apontar a Application `postech-api` para `k8s/overlays/aws`.

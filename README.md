@@ -93,14 +93,20 @@ flowchart LR
     push --> checks[Django checks, pip-audit, terraform validate]
     testes --> build[Build da imagem]
     checks --> build
-    build --> ghcr[Publica no GHCR]
+    build --> kind[Cluster Kind + banco via Terraform, deploy da API e testes]
+    kind --> ghcr[Publica no GHCR]
     ghcr --> gitops[Commit da nova tag em k8s/overlays]
     gitops --> argo[Argo CD detecta a mudança]
     argo --> cluster[Rolling da API no cluster]
 ```
 
-A pipeline (`.github/workflows/ci-multistage.yml`) não acessa o cluster: ela publica a imagem e grava a
-nova tag no repositório. O Argo CD, rodando dentro do cluster, acompanha a `main` e aplica a versão nova.
+A pipeline (`.github/workflows/ci-multistage.yml`) tem duas etapas de deploy:
+
+- **Deploy to Kind Cluster**: dentro do runner do GitHub, o script `infra/scripts/deploy-kind-ci.sh` cria o
+  cluster e o banco com os mesmos Terraform do ambiente local, aplica os manifestos (`k8s/overlays/ci`) com a
+  imagem recém-gerada e testa a API. Se falhar, nada é publicado.
+- **Publish Image and Update GitOps**: publica a imagem e grava a nova tag no repositório. O Argo CD, rodando
+  dentro do cluster, acompanha a `main` e aplica a versão nova.
 
 ## Índice
 
@@ -615,20 +621,22 @@ No PowerShell, na raiz do repositório:
 $kindDir = "infra/terraform/environments/local-kind"
 $postgresDir = "infra/terraform/environments/local-postgres"
 
-terraform -chdir=$kindDir init
-terraform -chdir=$kindDir plan
-terraform -chdir=$kindDir apply
-$env:KUBECONFIG = terraform -chdir=$kindDir output -raw kubeconfig_path
+terraform "-chdir=$kindDir" init
+terraform "-chdir=$kindDir" plan
+terraform "-chdir=$kindDir" apply
+$env:KUBECONFIG = terraform "-chdir=$kindDir" output -raw kubeconfig_path
 
-terraform -chdir=$postgresDir init
-terraform -chdir=$postgresDir plan
-terraform -chdir=$postgresDir apply
+terraform "-chdir=$postgresDir" init
+terraform "-chdir=$postgresDir" plan
+terraform "-chdir=$postgresDir" apply
 kubectl wait --for=condition=ready pod -l app=postech-db -n postech --timeout=180s
 kubectl get pods,pvc -n postech
 ```
 
-O Terraform gera `SECRET_KEY` e a senha PostgreSQL e cria `postech-secrets`. Os valores sensíveis
-ficam no state local: nunca versione `terraform.tfstate`, o kubeconfig ou arquivos `*.tfvars`.
+O Terraform gera `SECRET_KEY`, a senha PostgreSQL e o `WEBHOOK_TOKEN` e cria `postech-secrets`. Os valores
+sensíveis ficam no state local: nunca versione `terraform.tfstate`, o kubeconfig ou arquivos `*.tfvars`.
+Para chamar o webhook de orçamento, pegue o token com
+`terraform "-chdir=$postgresDir" output -raw webhook_token` e envie no header `X-Webhook-Token`.
 `--kubelet-insecure-tls` é habilitado no metrics-server somente porque Kind usa certificados locais;
 não use esse ajuste em produção.
 
@@ -651,8 +659,8 @@ crie também um `imagePullSecret` no namespace `postech` e referencie-o no Deplo
 Para remover os recursos, destrua primeiro o stack de workloads e depois o cluster:
 
 ```powershell
-terraform -chdir=$postgresDir destroy
-terraform -chdir=$kindDir destroy
+terraform "-chdir=$postgresDir" destroy
+terraform "-chdir=$kindDir" destroy
 Remove-Item Env:KUBECONFIG
 ```
 
