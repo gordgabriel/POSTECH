@@ -6,4 +6,4 @@ resources:
 images:
   - name: postech-api
     newName: ghcr.io/gordgabriel/postech
-    newTag: 56b3832cd1484687b3eabcda0304e87068f54dff
+    newTag: 11d2682b6f28609d677b24e4f47ff4f8ba4a4a4a
