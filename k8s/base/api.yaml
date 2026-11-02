@@ -42,6 +42,13 @@ spec:
                 secretKeyRef:
                   name: postech-secrets
                   key: DB_PASSWORD
+            # Opcional para não quebrar Secrets criados manualmente sem a chave; sem ela o webhook responde 403.
+            - name: WEBHOOK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: postech-secrets
+                  key: WEBHOOK_TOKEN
+                  optional: true
           readinessProbe:
             httpGet:
               path: /api/health/

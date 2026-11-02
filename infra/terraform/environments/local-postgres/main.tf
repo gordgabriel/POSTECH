@@ -57,6 +57,11 @@ resource "random_password" "django" {
   special = false
 }
 
+resource "random_password" "webhook" {
+  length  = 40
+  special = false
+}
+
 resource "kubernetes_namespace_v1" "postech" {
   metadata {
     name = "postech"
@@ -73,6 +78,7 @@ resource "kubernetes_secret_v1" "postech" {
     SECRET_KEY        = random_password.django.result
     DB_PASSWORD       = random_password.database.result
     POSTGRES_PASSWORD = random_password.database.result
+    WEBHOOK_TOKEN     = random_password.webhook.result
   }
 
   type = "Opaque"
@@ -198,4 +204,10 @@ resource "kubernetes_stateful_set_v1" "postgres" {
   }
 
   depends_on = [kubernetes_secret_v1.postech]
+}
+
+output "webhook_token" {
+  description = "Token esperado no header X-Webhook-Token do webhook de orçamento."
+  value       = random_password.webhook.result
+  sensitive   = true
 }
