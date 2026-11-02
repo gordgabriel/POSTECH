@@ -1,6 +1,6 @@
 # Sistema Integrado de Atendimento e Execução de Serviços
 
-Back-end da oficina mecânica — Tech Challenge Fase 2, Pós-Tech Software Architecture (FIAP), turma 15SOAT.
+Back-end da oficina mecânica — Tech Challenge Fase 2, Pós-Tech Software Architecture (FIAP), turma 17SOAT.
 
 API REST que cobre o ciclo da Ordem de Serviço (abertura, diagnóstico, orçamento, aprovação do cliente,
 execução, finalização e entrega), os cadastros de apoio (clientes, veículos, serviços) e o controle de
