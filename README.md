@@ -10,7 +10,7 @@ Monolito em Arquitetura Hexagonal, Django + Django REST Framework, autenticaçã
 
 | | |
 |---|---|
-| Vídeo demonstrativo | _link do vídeo_ |
+| Vídeo demonstrativo | https://www.youtube.com/watch?v=LIqqk8sND9Q |
 | Collection das APIs | [`postman_collection.json`](postman_collection.json) e Swagger em `/api/docs/` |
 
 ## Fase 2: objetivos
