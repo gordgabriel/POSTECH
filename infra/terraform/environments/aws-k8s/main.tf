@@ -24,8 +24,11 @@ provider "aws" {
 }
 
 locals {
-  name = "${var.project_name}-${var.environment}"
+  name         = "${var.project_name}-${var.environment}"
+  lab_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/LabRole"
 }
+
+data "aws_caller_identity" "current" {}
 
 data "aws_availability_zones" "available" {
   state = "available"
@@ -70,29 +73,9 @@ resource "aws_ec2_tag" "internal_load_balancer" {
   value       = "1"
 }
 
-resource "aws_iam_role" "cluster" {
-  name = "${local.name}-eks-cluster"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "eks.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "cluster" {
-  role       = aws_iam_role.cluster.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-}
-
 resource "aws_eks_cluster" "main" {
   name     = local.name
-  role_arn = aws_iam_role.cluster.arn
+  role_arn = local.lab_role_arn
   version  = var.kubernetes_version
 
   access_config {
@@ -108,46 +91,13 @@ resource "aws_eks_cluster" "main" {
     public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
   }
 
-  depends_on = [
-    aws_ec2_tag.cluster,
-    aws_iam_role_policy_attachment.cluster,
-  ]
-}
-
-resource "aws_iam_role" "nodes" {
-  name = "${local.name}-eks-nodes"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "ec2.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "nodes_worker" {
-  role       = aws_iam_role.nodes.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-}
-
-resource "aws_iam_role_policy_attachment" "nodes_cni" {
-  role       = aws_iam_role.nodes.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-}
-
-resource "aws_iam_role_policy_attachment" "nodes_ecr" {
-  role       = aws_iam_role.nodes.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  depends_on = [aws_ec2_tag.cluster]
 }
 
 resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "${local.name}-workers"
-  node_role_arn   = aws_iam_role.nodes.arn
+  node_role_arn   = local.lab_role_arn
   subnet_ids      = module.vpc.public_subnet_ids
   instance_types  = [var.node_instance_type]
   capacity_type   = "ON_DEMAND"
@@ -161,12 +111,6 @@ resource "aws_eks_node_group" "main" {
   update_config {
     max_unavailable = 1
   }
-
-  depends_on = [
-    aws_iam_role_policy_attachment.nodes_worker,
-    aws_iam_role_policy_attachment.nodes_cni,
-    aws_iam_role_policy_attachment.nodes_ecr,
-  ]
 }
 
 resource "aws_security_group" "database" {
