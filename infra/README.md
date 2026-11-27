@@ -60,7 +60,7 @@ Essa configuração é para laboratório, não produção. O banco não tem Mult
 
 ## Pré-requisitos e criação
 
-É necessário ter Terraform, AWS CLI e credenciais AWS configuradas para uma conta/região com permissões para VPC, EKS, EC2, IAM, RDS e Secrets Manager. O backend é local neste exemplo: não compartilhe o `terraform.tfstate` nem o diretório `.terraform`.
+É necessário ter Terraform, AWS CLI e credenciais AWS configuradas para uma conta/região com permissões para S3, VPC, EKS, EC2, IAM, RDS e Secrets Manager. O state usa o backend S3 `postech-tfstate-<AWS_ACCOUNT_ID>-<AWS_REGION>`; o workflow do AWS Academy cria esse bucket automaticamente. Para executar Terraform localmente, use o mesmo bucket e a mesma chave remota do workflow.
 
 No PowerShell:
 
@@ -69,16 +69,24 @@ Set-Location infra/terraform/environments/aws-k8s
 Copy-Item terraform.tfvars.example terraform.tfvars
 ```
 
-Edite `terraform.tfvars` e troque o IP de exemplo pelo seu IPv4 público de administração, com máscara `/32`. Antes de criar qualquer recurso, execute:
+Edite `terraform.tfvars` e troque o IP de exemplo pelo seu IPv4 público de administração, com máscara `/32`. Depois de o bucket ter sido criado pelo workflow, inicialize o backend remoto (a conta ativa no AWS CLI precisa ser a mesma indicada por `AWS_ACCOUNT_ID`):
 
 ```powershell
-terraform init
+$region = "us-east-1"
+$accountId = aws sts get-caller-identity --query Account --output text
+$bucket = "postech-tfstate-$accountId-$region"
+terraform init `
+  "-backend-config=bucket=$bucket" `
+  "-backend-config=key=postech/aws-k8s/terraform.tfstate" `
+  "-backend-config=region=$region" `
+  "-backend-config=encrypt=true" `
+  "-backend-config=use_lockfile=true"
 terraform fmt -check -recursive
 terraform validate
 terraform plan
 ```
 
-Revise o plano e os preços da região antes de executar `terraform apply`. Não faça `apply` sem entender os custos e confirmar a conta AWS selecionada. EKS cobra pelo plano de controle por hora; também há custos para EC2, armazenamento dos nós, RDS, armazenamento/backups, endereços IPv4 públicos e Secrets Manager. Não há NAT Gateway neste ambiente para reduzir custos, mas os recursos ainda geram cobrança enquanto existirem.
+O diretório Terraform local e o workflow compartilham o mesmo state S3; não execute `plan`/`apply` concorrentes. Revise o plano e os preços da região antes de executar `terraform apply`. Não faça `apply` sem entender os custos e confirmar a conta AWS selecionada. EKS cobra pelo plano de controle por hora; também há custos para EC2, armazenamento dos nós, RDS, armazenamento/backups, endereços IPv4 públicos e Secrets Manager. Não há NAT Gateway neste ambiente para reduzir custos, mas os recursos ainda geram cobrança enquanto existirem.
 
 Após a criação, use o comando exibido em `terraform output -raw configure_kubectl`, depois valide com `kubectl get nodes`. O Terraform apenas cria EKS e RDS; não instala Argo CD nem configura a aplicação para o banco automaticamente.
 
@@ -119,4 +127,36 @@ A senha do RDS gerenciada pelo Secrets Manager é copiada para um Kubernetes Sec
 
 Para remover o laboratório, execute `terraform destroy` no mesmo diretório depois de confirmar a conta e a região. Como o snapshot final está desabilitado, isso remove o banco e seus dados.
 
-O deploy Kubernetes local continua documentado no README principal e usa Kind; este ambiente Terraform AWS não é criado automaticamente pelo CI. O workflow apenas valida os arquivos, sem credenciais, `plan` ou `apply`.
+O deploy Kubernetes local continua documentado no README principal e usa Kind. O workflow normal de CI/CD não acessa a AWS: ele publica a imagem no GHCR e atualiza os overlays GitOps. Para o AWS Academy, o workflow manual `.github/workflows/terraform-aws.yml` usa as credenciais temporárias do laboratório armazenadas como GitHub Actions Secrets. Ele cria o bucket S3 do state se necessário e depois executa `plan`; `apply` requer aprovação no environment `aws-lab`.
+
+### Terraform AWS no AWS Academy
+
+Como o reset do AWS Academy apaga também IAM, S3 e state, não há uma role OIDC ou bucket que sobreviva para o GitHub reutilizar. O fluxo abaixo recria o bucket e a infraestrutura a partir das credenciais temporárias atuais. Você ainda precisa atualizar os três GitHub Secrets quando o Academy emitir um novo conjunto de credenciais; não há como obter automaticamente do portal do Academy credenciais que ainda não foram fornecidas ao GitHub.
+
+1. Inicie o Learner Lab. Em **AWS Details → Show → AWS CLI**, copie os valores temporários para os GitHub Secrets; não os cole no repositório, em workflow inputs, issues ou chats.
+2. No GitHub, abra **Settings → Secrets and variables → Actions → Secrets → New repository secret** e cadastre:
+
+   | Secret | Valor |
+   |---|---|
+   | `AWS_ACCESS_KEY_ID` | `aws_access_key_id` exibido pelo Learner Lab |
+   | `AWS_SECRET_ACCESS_KEY` | `aws_secret_access_key` exibido pelo Learner Lab |
+   | `AWS_SESSION_TOKEN` | `aws_session_token` exibido pelo Learner Lab |
+
+   São credenciais temporárias: atualize os três secrets sempre que o Learner Lab gerar credenciais novas. Inicie o workflow enquanto elas ainda estiverem válidas; uma aprovação demorada antes do `apply` pode fazer a sessão expirar.
+3. Em **Settings → Secrets and variables → Actions → Secrets → New repository secret**, cadastre também:
+
+   | Secret | Valor |
+   |---|---|
+   | `AWS_ACCOUNT_ID` | ID de 12 dígitos da conta indicada no Learner Lab |
+   | `AWS_REGION` | `us-east-1` (ou uma região permitida pelo laboratório) |
+   | `EKS_ADMIN_CIDR_JSON` | `["SEU_IP_PUBLICO/32"]` |
+
+   O workflow aceita esses três valores como secrets também; não é necessário cadastrá-los em Variables. `AWS_ACCOUNT_ID` é uma proteção contra executar com as credenciais da conta errada. Ao mudar de conta, atualize-o junto com os três secrets de credenciais. O CIDR restringe o endpoint público do EKS; use somente IPs confiáveis, nunca `0.0.0.0/0`.
+4. Em **Settings → Environments**, crie `aws-lab` e configure reviewers obrigatórios. Esse ambiente protege a etapa `apply`.
+5. Na primeira execução, vá a **Actions → Terraform AWS (EKS + RDS) → Run workflow**, escolha `plan` e branch `main`. O workflow verifica se as credenciais correspondem a `AWS_ACCOUNT_ID`, cria um bucket com nome `postech-tfstate-<AWS_ACCOUNT_ID>-<AWS_REGION>` se ele ainda não existir, ativa versionamento/criptografia/bloqueio de acesso público e executa Terraform. Depois confira o plano e os custos; execute novamente com `apply` para aprovar e criar EKS/RDS.
+
+O nome do bucket e a chave do state são calculados/definidos pelo workflow; não precisam de GitHub Variable. Se o reset apagar o bucket e o state, a próxima execução começa novamente sem state. O workflow espera que os recursos da execução anterior também tenham sido apagados; não use um state novo para gerenciar recursos antigos que ainda existam.
+
+O AWS Academy pode restringir IAM, `iam:PassRole`, EKS, VPC ou RDS. O workflow não contorna essas políticas: se o Terraform receber `AccessDenied`, o administrador do laboratório precisa habilitar o serviço/permissão ou será necessário escolher uma arquitetura permitida. EKS e RDS podem consumir o saldo do laboratório rapidamente e podem demorar para provisionar.
+
+Esse workflow provisiona infraestrutura EKS/RDS; ele não instala Argo CD nem cria o Secret Kubernetes da aplicação. O passo a passo existente acima continua necessário para conectar e publicar a aplicação no cluster. Não envie arquivos `.tfstate`, planos Terraform ou credenciais para o Git.
