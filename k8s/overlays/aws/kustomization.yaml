@@ -8,4 +8,4 @@ patches:
 images:
   - name: postech-api
     newName: ghcr.io/gordgabriel/postech
-    newTag: 6609ec8be1d72035c7705939469fe61089c943cc
+    newTag: 4bf80851eeb6d10f868f112682838b05478bd163
